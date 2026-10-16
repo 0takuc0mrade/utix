@@ -1,17 +1,23 @@
-import { recordAudit } from "@/core/audit/audit";
-import { notificationMachine, transitionRecord } from "@/core/lifecycle/records";
+import { recordAudit } from "@/core/audit/audit.ts";
+import { notificationMachine, transitionRecord } from "@/core/lifecycle/records.ts";
 import {
   NOTIFICATION_EVENTS,
+  createDefaultPreferences,
   type Notification,
+  type NotificationCategory,
   type NotificationEventType,
   type NotificationInput,
+  type NotificationPreferences,
   type NotificationRecipient,
   type NotificationState,
   type NotificationStorage,
-  type NotificationTone
-} from "@/core/notifications/types";
+  type NotificationTone,
+  type NotificationUrgency
+} from "./types.ts";
 
 const STORAGE_PREFIX = "utix:notifications:v1:";
+const PREFERENCES_PREFIX = "utix:notification-preferences:v1:";
+
 /** The initial state, taken from the lifecycle table rather than repeated. */
 const INITIAL_STATE = notificationMachine.initial() as NotificationState;
 const READ_STATE: NotificationState = "read";
@@ -119,6 +125,16 @@ function parseNotification(value: unknown): Notification | null {
       ? READ_STATE
       : INITIAL_STATE;
 
+  const urgency: NotificationUrgency =
+    item.urgency === "mandatory" ? "mandatory" : "standard";
+
+  const category: NotificationCategory =
+    item.category === "security" ||
+    item.category === "lifecycle" ||
+    item.category === "compliance"
+      ? item.category
+      : "operational";
+
   return {
     id: item.id,
     recipient: item.recipient,
@@ -130,6 +146,9 @@ function parseNotification(value: unknown): Notification | null {
     dedupeKey: item.dedupeKey,
     createdAt: item.createdAt,
     state,
+    urgency,
+    category,
+    routedAs: item.routedAs,
     // Derived once, from the single source of truth.
     read: state === READ_STATE || state === "archived"
   };
@@ -146,6 +165,10 @@ export class NotificationStore {
 
   private key(recipient: NotificationRecipient): string {
     return `${STORAGE_PREFIX}${recipient}`;
+  }
+
+  private prefKey(recipient: NotificationRecipient): string {
+    return `${PREFERENCES_PREFIX}${recipient}`;
   }
 
   private read(recipient: NotificationRecipient): Notification[] {
@@ -165,6 +188,135 @@ export class NotificationStore {
 
   private write(recipient: NotificationRecipient, notifications: Notification[]): void {
     this.storage.setItem(this.key(recipient), JSON.stringify(notifications.slice(0, this.maxEntries)));
+  }
+
+  /**
+   * Retrieves durable preferences for a recipient. Returns default preferences if none stored.
+   */
+  getPreferences(recipient: NotificationRecipient): NotificationPreferences {
+    if (!isNotificationRecipient(recipient)) {
+      return createDefaultPreferences("workspace");
+    }
+    const raw = this.storage.getItem(this.prefKey(recipient));
+    if (!raw) {
+      return createDefaultPreferences(recipient);
+    }
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || parsed === null) {
+        return createDefaultPreferences(recipient);
+      }
+      const defaults = createDefaultPreferences(recipient);
+      return {
+        recipient,
+        muted: typeof parsed.muted === "boolean" ? parsed.muted : defaults.muted,
+        enabledEvents: {
+          ...defaults.enabledEvents,
+          ...(typeof parsed.enabledEvents === "object" && parsed.enabledEvents !== null
+            ? parsed.enabledEvents
+            : {})
+        },
+        enabledTones: {
+          ...defaults.enabledTones,
+          ...(typeof parsed.enabledTones === "object" && parsed.enabledTones !== null
+            ? parsed.enabledTones
+            : {})
+        },
+        enabledCategories: {
+          ...defaults.enabledCategories,
+          ...(typeof parsed.enabledCategories === "object" && parsed.enabledCategories !== null
+            ? parsed.enabledCategories
+            : {})
+        },
+        mandatoryAlertsAlwaysDeliver: true,
+        updatedAt: typeof parsed.updatedAt === "string" ? parsed.updatedAt : defaults.updatedAt,
+        version: typeof parsed.version === "number" ? parsed.version : defaults.version
+      };
+    } catch {
+      return createDefaultPreferences(recipient);
+    }
+  }
+
+  /**
+   * Updates durable preferences for a recipient and records an audit log.
+   */
+  updatePreferences(
+    recipient: NotificationRecipient,
+    patch: Partial<Omit<NotificationPreferences, "recipient" | "mandatoryAlertsAlwaysDeliver">>
+  ): NotificationPreferences {
+    if (!isNotificationRecipient(recipient)) {
+      throw new Error(`Invalid notification recipient: ${String(recipient)}`);
+    }
+    const current = this.getPreferences(recipient);
+    const updated: NotificationPreferences = {
+      recipient,
+      muted: typeof patch.muted === "boolean" ? patch.muted : current.muted,
+      enabledEvents: {
+        ...current.enabledEvents,
+        ...(patch.enabledEvents ?? {})
+      },
+      enabledTones: {
+        ...current.enabledTones,
+        ...(patch.enabledTones ?? {})
+      },
+      enabledCategories: {
+        ...current.enabledCategories,
+        ...(patch.enabledCategories ?? {})
+      },
+      mandatoryAlertsAlwaysDeliver: true,
+      updatedAt: new Date().toISOString(),
+      version: current.version + 1
+    };
+
+    this.storage.setItem(this.prefKey(recipient), JSON.stringify(updated));
+
+    recordAudit({
+      action: "notification_preferences.updated",
+      actor: { kind: "user", id: recipient },
+      target: { kind: "notification", id: recipient },
+      before: { muted: current.muted, version: current.version },
+      after: { muted: updated.muted, version: updated.version },
+      at: updated.updatedAt,
+      reason: "user_preference_update"
+    });
+
+    return updated;
+  }
+
+  /**
+   * Resets preferences to factory defaults.
+   */
+  resetPreferences(recipient: NotificationRecipient): NotificationPreferences {
+    if (!isNotificationRecipient(recipient)) {
+      throw new Error(`Invalid notification recipient: ${String(recipient)}`);
+    }
+    const defaults = createDefaultPreferences(recipient);
+    this.storage.removeItem(this.prefKey(recipient));
+
+    recordAudit({
+      action: "notification_preferences.reset",
+      actor: { kind: "user", id: recipient },
+      target: { kind: "notification", id: recipient },
+      at: new Date().toISOString(),
+      reason: "reset_to_default_preferences"
+    });
+
+    return defaults;
+  }
+
+  /**
+   * Determines if a notification qualifies as a mandatory security or lifecycle alert.
+   */
+  isMandatoryAlert(input: NotificationInput): boolean {
+    if (input.urgency === "mandatory") return true;
+    if (input.category === "security") return true;
+    if (input.category === "lifecycle" && (input.tone === "error" || input.tone === "warning")) {
+      return true;
+    }
+    // High-impact system failures or recoveries are mandatory by default
+    if (input.event === "failure" && input.tone === "error") return true;
+    if (input.event === "recovery" && input.tone !== "info") return true;
+    return false;
   }
 
   list(recipient: NotificationRecipient): Notification[] {
@@ -199,6 +351,50 @@ export class NotificationStore {
     );
     if (duplicate) return duplicate;
 
+    const isMandatory = this.isMandatoryAlert(input);
+    const preferences = this.getPreferences(input.recipient);
+
+    const category: NotificationCategory =
+      input.category ??
+      (input.event === "failure" || input.event === "recovery"
+        ? "lifecycle"
+        : "operational");
+
+    const urgency: NotificationUrgency =
+      input.urgency ?? (isMandatory ? "mandatory" : "standard");
+
+    // Check optional notification preference suppression
+    const eventAllowed = preferences.enabledEvents[input.event] ?? true;
+    const toneAllowed = preferences.enabledTones[input.tone] ?? true;
+    const categoryAllowed = preferences.enabledCategories[category] ?? true;
+    const suppressedByPreference =
+      preferences.muted || !eventAllowed || !toneAllowed || !categoryAllowed;
+
+    let routedAs: "preference_delivered" | "mandatory_override" = "preference_delivered";
+
+    if (suppressedByPreference) {
+      if (!isMandatory) {
+        // Optional notifications respect user preferences and are suppressed
+        recordAudit({
+          action: "notification.suppressed_by_preference",
+          actor: { kind: "user", id: input.recipient },
+          target: { kind: "notification", id: input.dedupeKey },
+          before: { event: input.event, tone: input.tone, category },
+          reason: preferences.muted ? "user_muted_all" : "user_filtered_event_or_tone"
+        });
+        return null;
+      }
+      // Mandatory security & lifecycle alerts OVERRIDE user suppression
+      routedAs = "mandatory_override";
+      recordAudit({
+        action: "notification.mandatory_override",
+        actor: { kind: "system", id: "mandatory_alert_router" },
+        target: { kind: "notification", id: input.dedupeKey },
+        after: { event: input.event, tone: input.tone, category, urgency: "mandatory" },
+        reason: "mandatory_alert_bypassed_suppression"
+      });
+    }
+
     const timestamp = input.occurredAt ?? Date.now();
     const createdAt = new Date(Number.isFinite(timestamp) ? timestamp : Date.now()).toISOString();
     const href = scrub(input.href, 1000);
@@ -213,7 +409,10 @@ export class NotificationStore {
       dedupeKey,
       createdAt,
       state: INITIAL_STATE,
-      read: false
+      read: false,
+      urgency,
+      category,
+      routedAs
     };
 
     this.write(input.recipient, [notification, ...existing]);
@@ -221,7 +420,7 @@ export class NotificationStore {
       action: "notification.published",
       actor: { kind: "user", id: input.recipient },
       target: { kind: "notification", id: notification.id },
-      after: { event: input.event, tone: input.tone },
+      after: { event: input.event, tone: input.tone, urgency, category, routedAs },
       at: createdAt,
       reason: notification.dedupeKey
     });
