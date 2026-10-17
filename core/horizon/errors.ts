@@ -67,8 +67,8 @@ export function classifyHorizonError(error: unknown): HorizonErrorClassification
   if (typeof error === "object" && error !== null && "response" in error) {
     const data = (error as { response?: { data?: { title?: string; detail?: string } } })
       .response?.data;
-    if (data?.title) detail.title = data.title;
-    if (data?.detail) detail.detail = data.detail;
+    if (data?.title) detail.title = redact(data.title) as string;
+    if (data?.detail) detail.detail = redact(data.detail) as string;
   }
 
   let code: HorizonErrorCode = "unknown";
