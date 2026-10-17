@@ -19,6 +19,7 @@ Administrative role for project maintainers and operators.
 - `admin:health` - Access operational health dashboard
 - `admin:recovery` - Run disaster recovery validation
 - `admin:metrics` - View system metrics
+- `admin:replay` - Rebuild, promote and roll back projections (see [EVENT_REPLAY.md](./EVENT_REPLAY.md))
 
 ### Service
 Limited administrative role for automated services and monitoring systems.

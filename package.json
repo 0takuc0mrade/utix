@@ -27,6 +27,7 @@
     "verify:boundaries": "node scripts/check-feature-boundaries.mjs",
     "verify:issues": "node scripts/validate-issue-catalog.mjs",
     "verify:contract": "vitest run core/contract",
+    "verify:replay": "vitest run core/replay",
     "new:feature": "node scripts/new-feature.mjs",
     "postinstall": "node scripts/generate-registry.mjs",
     "verify:fixtures": "vitest run core/testing/__tests__/fixtures.contract.test.ts --reporter=verbose",

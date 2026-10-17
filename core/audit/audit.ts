@@ -55,7 +55,11 @@ export const SENSITIVE_ACTIONS = [
   /** A maintainer raised, lowered or blocked a quota for a principal or globally. */
   "quota.override_granted",
   /** A maintainer removed a quota override before it expired. */
-  "quota.override_revoked"
+  "quota.override_revoked",
+  /** A projection was rebuilt or caught up from the event log (or the run failed). */
+  "projection.replayed",
+  /** A projection's active version was promoted or rolled back. */
+  "projection.activated"
 ] as const;
 
 export type AuditAction = (typeof SENSITIVE_ACTIONS)[number];
