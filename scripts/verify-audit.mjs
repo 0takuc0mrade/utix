@@ -47,7 +47,9 @@ const boundaries = [
   { file: "core/reconciliation/job.ts", emitter: "reconciliation.reported" },
   { file: "core/idempotency/idempotency.ts", emitter: "idempotency.claim_released" },
   { file: "core/quota/quota.ts", emitter: "quota.override_granted" },
-  { file: "core/quota/quota.ts", emitter: "quota.override_revoked" }
+  { file: "core/quota/quota.ts", emitter: "quota.override_revoked" },
+  { file: "core/replay/replay.ts", emitter: "projection.replayed" },
+  { file: "core/replay/replay.ts", emitter: "projection.activated" }
 ];
 
 const sources = new Map();

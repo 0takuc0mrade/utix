@@ -12,7 +12,8 @@ export type Permission =
   | 'view:dashboard'
   | 'admin:health'
   | 'admin:recovery'
-  | 'admin:metrics';
+  | 'admin:metrics'
+  | 'admin:replay';
 
 export interface RolePermissions {
   role: Role;
@@ -21,7 +22,7 @@ export interface RolePermissions {
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   viewer: ['view:tools', 'view:dashboard'],
-  maintainer: ['view:tools', 'view:dashboard', 'admin:health', 'admin:recovery', 'admin:metrics'],
+  maintainer: ['view:tools', 'view:dashboard', 'admin:health', 'admin:recovery', 'admin:metrics', 'admin:replay'],
   service: ['admin:health', 'admin:metrics'],
 };
 

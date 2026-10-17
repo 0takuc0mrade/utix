@@ -48,6 +48,8 @@ cannot disagree about coverage:
 | `idempotency.claim_released`| `core/idempotency/idempotency.ts` (`abandon`) |
 | `quota.override_granted`    | `core/quota/quota.ts` (`grantOverride`)       |
 | `quota.override_revoked`    | `core/quota/quota.ts` (`revokeOverride`)      |
+| `projection.replayed`       | `core/replay/replay.ts` (`replayProjection`)  |
+| `projection.activated`      | `core/replay/replay.ts` (`promoteProjection`, `rollbackProjection`) |
 
 ### Which lifecycle moves are audited
 
