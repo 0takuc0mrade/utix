@@ -69,7 +69,15 @@ export const SENSITIVE_ACTIONS = [
   /** A projection's active version was promoted or rolled back. */
   "projection.activated",
   /** Administrative configuration was changed (or a change was refused). */
-  "admin.config_changed"
+  "admin.config_changed",
+  /** A delegated permission was granted (or a grant was refused). */
+  "authorization.granted",
+  /** A delegated permission was renewed (or a renewal was refused). */
+  "authorization.renewed",
+  /** A delegated permission was revoked (or a revocation was refused). */
+  "authorization.revoked",
+  /** A stale delegated permission was removed by cleanup (or cleanup was refused). */
+  "authorization.cleaned_up"
 ] as const;
 
 export type AuditAction = (typeof SENSITIVE_ACTIONS)[number];

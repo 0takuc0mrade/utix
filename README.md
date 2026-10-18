@@ -28,6 +28,10 @@ Infrastructure docs: [Telemetry](./docs/TELEMETRY.md) ·
 [Reconciliation](./docs/RECONCILIATION.md) ·
 [Audit trail](./docs/AUDIT.md) ·
 [Tamper-evident ledger](./docs/LEDGER.md) ·
+[Fee calculation](./docs/FEES.md) ·
+[Authorization expiry](./docs/AUTHORIZATIONS.md) ·
+[Public status feed](./docs/PUBLIC_STATUS.md) ·
+[Seed data](./docs/SEED_DATA.md) ·
 [API Contract](./docs/API_CONTRACT.md).
 
 ## Tools

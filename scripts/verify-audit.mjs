@@ -51,7 +51,11 @@ const boundaries = [
   { file: "core/quota/quota.ts", emitter: "quota.override_revoked" },
   { file: "core/replay/replay.ts", emitter: "projection.replayed" },
   { file: "core/replay/replay.ts", emitter: "projection.activated" },
-  { file: "core/admin-config/store.ts", emitter: "admin.config_changed" }
+  { file: "core/admin-config/store.ts", emitter: "admin.config_changed" },
+  { file: "core/authorizations/store.ts", emitter: "authorization.granted" },
+  { file: "core/authorizations/store.ts", emitter: "authorization.renewed" },
+  { file: "core/authorizations/store.ts", emitter: "authorization.revoked" },
+  { file: "core/authorizations/store.ts", emitter: "authorization.cleaned_up" }
 ];
 
 const sources = new Map();

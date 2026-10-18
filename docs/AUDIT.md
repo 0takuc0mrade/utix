@@ -51,6 +51,10 @@ cannot disagree about coverage:
 | `quota.override_revoked`    | `core/quota/quota.ts` (`revokeOverride`)      |
 | `projection.replayed`       | `core/replay/replay.ts` (`replayProjection`)  |
 | `projection.activated`      | `core/replay/replay.ts` (`promoteProjection`, `rollbackProjection`) |
+| `authorization.granted`     | `core/authorizations/store.ts` (`grant`)      |
+| `authorization.renewed`     | `core/authorizations/store.ts` (`renew`)      |
+| `authorization.revoked`     | `core/authorizations/store.ts` (`revoke`)     |
+| `authorization.cleaned_up`  | `core/authorizations/store.ts` (`cleanup`)    |
 
 ### Which lifecycle moves are audited
 
