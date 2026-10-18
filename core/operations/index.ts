@@ -49,3 +49,4 @@ export {
   type StepRunInput,
   type StepStatus
 } from "@/core/operations/types";
+export { createSideEffectDispatcher, type DispatchJob, type DispatchStore, type DispatchStatus, type SideEffectDispatcherOptions } from "./dispatcher";

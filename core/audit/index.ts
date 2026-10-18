@@ -37,3 +37,4 @@ export {
   type RetentionPolicy,
   type RetentionSweepResult
 } from "./retention";
+export { createAuditEvidenceBundle, verifyAuditEvidenceBundle, type AuditEvidenceBundle } from "./evidence-bundle";
