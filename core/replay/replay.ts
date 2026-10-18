@@ -186,6 +186,26 @@ export async function replayProjection<S>(
   const writeSlot = (status: ProjectionSlot["status"]) =>
     deps.store.putSlot<S>({ name, version, state, checkpoint, status, eventsApplied, updatedAt: new Date(now()).toISOString() });
 
+  /**
+   * Refreshes our hold on the projection lock. A run that has been paused past
+   * `lockTtlMs` and finds another owner here must not write: the new owner's
+   * slot is authoritative, and a late write would clobber it.
+   */
+  const ownsLock = (): boolean =>
+    opts.dryRun || deps.store.acquireLock(name, lockOwner, now(), opts.lockTtlMs);
+
+  /**
+   * Stops without touching the slot, because another run owns it now. The
+   * reported checkpoint is the durable one: this run may have applied a batch
+   * in memory, but it was never committed.
+   */
+  const lostLock = () =>
+    failure("replay_in_progress", {
+      checkpoint: deps.store.getSlot(name, version)?.checkpoint ?? 0,
+      message: `lost the replay lock for ${name} to another run`,
+      retries
+    });
+
   const appliedBefore = eventsApplied;
   let retries = 0;
   let batches = 0;
@@ -194,17 +214,23 @@ export async function replayProjection<S>(
   let eventsUpcast = 0;
   const skipped: SkippedEvent[] = [];
 
-  /** Fails the run, leaving a staging slot at the last good checkpoint for `resume`. */
+  /**
+   * Fails the run, leaving a staging slot at the last good checkpoint for
+   * `resume`. The slot is only written while this run still owns the lock: a
+   * run that lost it must leave the new owner's slot untouched.
+   */
   const halt = (code: ReplayErrorCode, detail: Omit<ReplayFailure, "runId" | "projection" | "version" | "checkpoint" | "retries">) => {
-    if (commitPerBatch) writeSlot("failed");
+    if (commitPerBatch && ownsLock()) writeSlot("failed");
     return failure(code, { checkpoint, retries, ...detail });
   };
 
   try {
+    if (!ownsLock()) return lostLock();
     if (commitPerBatch && opts.mode === "rebuild") writeSlot("building");
 
     let done = false;
     while (!done) {
+      if (!ownsLock()) return lostLock();
       if (opts.untilSequence !== undefined && checkpoint >= opts.untilSequence) break;
 
       let batch: readonly ReplayEvent[] | undefined;
@@ -280,10 +306,11 @@ export async function replayProjection<S>(
         checkpoint = event.sequence;
       }
 
+      if (!ownsLock()) return lostLock();
       if (commitPerBatch) writeSlot("building");
-      if (!opts.dryRun) deps.store.acquireLock(name, lockOwner, now(), opts.lockTtlMs);
     }
 
+    if (!ownsLock()) return lostLock();
     const violations = definition.validate?.(state) ?? [];
     if (violations.length > 0) {
       return halt("validation_failed", { message: `${violations.length} invariant violation(s)`, violations });

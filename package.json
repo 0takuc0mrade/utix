@@ -29,6 +29,7 @@
     "verify:issues": "node scripts/validate-issue-catalog.mjs",
     "verify:contract": "vitest run core/contract",
     "verify:replay": "vitest run core/replay",
+    "verify:replay-concurrency": "vitest run core/replay/__tests__/replay.deterministic.test.ts --reporter=verbose",
     "new:feature": "node scripts/new-feature.mjs",
     "postinstall": "node scripts/generate-registry.mjs",
     "verify:fixtures": "vitest run core/testing/__tests__/fixtures.contract.test.ts --reporter=verbose",
