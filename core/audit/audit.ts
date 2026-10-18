@@ -52,6 +52,8 @@ export const SENSITIVE_ACTIONS = [
   "notification.cleared",
   /** A reconciliation dry run produced a report. */
   "reconciliation.reported",
+  /** An approved repair plan applied, reverted or was refused. */
+  "reconciliation.repaired",
   /** An in-flight idempotency claim was released for a retry. */
   "idempotency.claim_released",
   /** A maintainer raised, lowered or blocked a quota for a principal or globally. */

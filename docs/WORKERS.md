@@ -84,8 +84,10 @@ retry.ok && retry.value.replayed; // true — same job id, one queued job
 ## Reconciliation dry run
 
 `core/reconciliation/` registers `reconciliation.dry_run`: a read-only job that
-compares stored records against derived balances and emits a drift report. It
-has no repair path — see [RECONCILIATION.md](./RECONCILIATION.md).
+compares stored records against derived balances and emits a drift report. The
+job never repairs: a repair is planned from the report and applied only by an
+explicit, confirmed call outside the worker queue — see
+[RECONCILIATION.md](./RECONCILIATION.md).
 
 ## Moving one operation in already
 

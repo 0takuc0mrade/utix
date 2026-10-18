@@ -19,7 +19,7 @@ scripts/     registry generation, scaffolding, contract verification
 | `core/workers` | Background worker framework: delayed, retryable, dead-lettered jobs |
 | `core/lifecycle` | Record state machines: declared states, legal transitions, rejected moves |
 | `core/idempotency` | Idempotency keys, persisted outcomes and replay protection |
-| `core/reconciliation` | Read-only dry-run reconciliation of stored records against derived state |
+| `core/reconciliation` | Dry-run reconciliation of stored records against derived state, with root-cause hints and a confirmed, re-checked repair workflow |
 | `core/operations` | Recovery for interrupted multi-step flows: checkpoints, resume, stuck-operation diagnostics |
 | `core/audit` | Append-only audit trail for sensitive user and maintainer actions |
 | `core/export` | Privacy-safe, scoped, schema-versioned data exports |
@@ -120,7 +120,8 @@ CI runs the same steps on every pull request, including
 `npm run verify:issues`, which preserves a backlog of at least 40
 independent specifications with a stable 20-issue advanced wave,
 `npm run verify:reconciliation`, which fails if a declared invariant is never
-checked or if the dry run ever grows a write path,
+checked or has no repair strategy, if the dry run ever grows a write path, or
+if the repair path loses one of its dry-run-first guards,
 `npm run verify:audit`, which fails if a declared sensitive action has no
 emitter at a domain boundary, if a boundary records an undeclared one, or if the
 trail ever gains an update, a delete or an unredacted context, and

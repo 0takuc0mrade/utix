@@ -12,7 +12,12 @@
  * - the snapshot is treated as immutable, so a dry run in CI cannot alter the
  *   state it is inspecting;
  * - drift is reported with **repair guidance**, never applied. A repair that
- *   changes production data is a separate, reviewed operation.
+ *   changes production data is a separate, reviewed operation
+ *   (`core/reconciliation/repair.ts`), which plans from this report and
+ *   re-checks it before anything is written;
+ * - each finding carries a **root-cause hint** derived from evidence in the
+ *   same snapshot, so a report says *why* a record probably drifted, not only
+ *   *that* it did.
  *
  * Findings fall into four kinds, because they need four different responses:
  *
@@ -139,6 +144,21 @@ export const RECONCILIATION_INVARIANTS: readonly ReconciliationInvariant[] = [
 
 const INVARIANT_INDEX = new Map(RECONCILIATION_INVARIANTS.map((entry) => [entry.id, entry]));
 
+/**
+ * Why a record probably drifted. Derived only from evidence in the snapshot, so
+ * it is a hint, not a diagnosis: `likely` means the evidence points one way,
+ * `possible` means it is the best of several explanations.
+ */
+export interface RootCauseHint {
+  /** Stable, machine-readable cause, e.g. `cache_stale`. */
+  readonly code: string;
+  readonly confidence: "likely" | "possible";
+  /** Safe, human-readable explanation. */
+  readonly hint: string;
+  /** Short `name=value` facts the hint was derived from. */
+  readonly evidence?: readonly string[];
+}
+
 export interface ReconciliationFinding {
   /** Stable id, e.g. `worker_job.dedupe_unique:job-1`. */
   readonly id: string;
@@ -154,6 +174,8 @@ export interface ReconciliationFinding {
   readonly observed?: string;
   /** The invariant's repair guidance, copied onto the finding. */
   readonly repair: string;
+  /** Additive: the most probable cause, when the snapshot holds evidence. */
+  readonly rootCause?: RootCauseHint;
 }
 
 /** A user-facing balance as the app stored it. Amounts are strings. */
@@ -262,7 +284,7 @@ function finding(
   subject: string,
   recordId: string,
   detail: string,
-  extra: { expected?: string; observed?: string; severity?: FindingSeverity } = {}
+  extra: { expected?: string; observed?: string; severity?: FindingSeverity; rootCause?: RootCauseHint } = {}
 ): ReconciliationFinding {
   const declared = INVARIANT_INDEX.get(invariant);
   if (!declared) throw new Error(`[reconciliation] undeclared invariant ${invariant}`);
@@ -277,9 +299,116 @@ function finding(
     detail: scrubSecrets(detail),
     expected: extra.expected === undefined ? undefined : scrubSecrets(extra.expected),
     observed: extra.observed === undefined ? undefined : scrubSecrets(extra.observed),
-    repair: declared.repair
+    repair: declared.repair,
+    rootCause: extra.rootCause === undefined ? undefined : scrubCause(extra.rootCause)
   };
 }
+
+function scrubCause(cause: RootCauseHint): RootCauseHint {
+  return {
+    code: cause.code,
+    confidence: cause.confidence,
+    hint: scrubSecrets(cause.hint),
+    evidence: cause.evidence?.map(scrubSecrets)
+  };
+}
+
+function cause(
+  code: string,
+  confidence: RootCauseHint["confidence"],
+  hint: string,
+  evidence?: string[]
+): RootCauseHint {
+  return evidence && evidence.length ? { code, confidence, hint, evidence } : { code, confidence, hint };
+}
+
+/** Stellar amounts carry at most seven decimal places. */
+const STELLAR_DECIMALS = 7;
+
+function fractionDigits(value: string): number {
+  const fraction = value.trim().split(".")[1];
+  return fraction ? fraction.length : 0;
+}
+
+const DEFAULT_STALE_AFTER_MS = 5 * 60 * 1_000;
+
+function staleAfterOf(input: ReconciliationInput): number {
+  return input.staleAfterMs ?? DEFAULT_STALE_AFTER_MS;
+}
+
+/**
+ * Statuses older or newer builds wrote for a job. Seeing one means a write site
+ * ran a different schema, not that the lifecycle is missing a state.
+ */
+const LEGACY_JOB_STATUSES: Readonly<Record<string, string>> = {
+  pending: "queued",
+  failed: "dead_lettered",
+  completed: "succeeded",
+  done: "succeeded",
+  in_progress: "running"
+};
+
+function missingLedgerCause(input: ReconciliationInput, entry: StoredBalance): RootCauseHint {
+  if (input.ledgerBalances.length === 0) {
+    return cause(
+      "ledger_read_empty",
+      "likely",
+      "The snapshot carries no ledger entries at all, so the ledger read most likely failed or was skipped. Do not drop any cached line on this evidence.",
+      [`stored_lines=${input.storedBalances.length}`, "ledger_lines=0"]
+    );
+  }
+  const otherAssets = input.ledgerBalances.filter((line) => line.account === entry.account);
+  if (otherAssets.length > 0) {
+    return cause(
+      "trustline_removed",
+      "likely",
+      `The ledger still reports ${otherAssets.length} other asset line(s) for this account but not ${entry.asset}; the trustline was probably removed after the line was cached.`,
+      [`ledger_assets_for_account=${otherAssets.length}`]
+    );
+  }
+  return cause(
+    "account_not_loaded",
+    "possible",
+    "The ledger snapshot holds nothing for this account. It may have been merged or never funded, or the read was partial; re-read the account before acting.",
+    ["ledger_lines_for_account=0"]
+  );
+}
+
+function amountDriftCause(input: ReconciliationInput, entry: StoredBalance, reference: LedgerBalance): RootCauseHint {
+  if (fractionDigits(entry.balance) > STELLAR_DECIMALS || fractionDigits(reference.balance) > STELLAR_DECIMALS) {
+    return cause(
+      "precision_mismatch",
+      "likely",
+      `One side carries more than ${STELLAR_DECIMALS} decimal places; the amount was probably converted through a float or a different scale.`,
+      [`stored_places=${fractionDigits(entry.balance)}`, `ledger_places=${fractionDigits(reference.balance)}`]
+    );
+  }
+  const cachedAt = entry.cachedAt === undefined ? Number.NaN : Date.parse(entry.cachedAt);
+  if (!Number.isFinite(cachedAt)) {
+    return cause(
+      "cache_age_unknown",
+      "possible",
+      "The cached line has no usable cachedAt, so it cannot be told apart from an ordinary stale cache. Record cachedAt at the write site.",
+      ["cached_at=unknown"]
+    );
+  }
+  const age = input.now - cachedAt;
+  if (age > staleAfterOf(input)) {
+    return cause(
+      "cache_stale",
+      "likely",
+      `The line was cached ${Math.round(age / 1_000)}s ago, longer than the staleness window; the ledger has most likely moved since.`,
+      [`cache_age_s=${Math.round(age / 1_000)}`, `reference=${reference.reference}`]
+    );
+  }
+  return cause(
+    "write_race",
+    "possible",
+    "The line was cached recently and still disagrees: a ledger close between the read and the cache write, or a read from a different network, is the likely window.",
+    [`cache_age_s=${Math.max(0, Math.round(age / 1_000))}`, `reference=${reference.reference}`]
+  );
+}
+
 
 function defaultSeverity(kind: FindingKind): FindingSeverity {
   switch (kind) {
@@ -308,7 +437,8 @@ const checks: { invariant: string; run: Check }[] = [
             "balance.ledger_entry_present",
             "stored_balance",
             balanceKey(entry),
-            `No ledger entry for ${entry.asset} on ${entry.account}; the stored line cannot be settled.`
+            `No ledger entry for ${entry.asset} on ${entry.account}; the stored line cannot be settled.`,
+            { rootCause: missingLedgerCause(input, entry) }
           )
         );
     }
@@ -328,7 +458,7 @@ const checks: { invariant: string; run: Check }[] = [
               "stored_balance",
               balanceKey(entry),
               `Stored ${entry.asset} balance disagrees with ledger reference ${reference.reference}.`,
-              { expected: reference.balance, observed: entry.balance }
+              { expected: reference.balance, observed: entry.balance, rootCause: amountDriftCause(input, entry, reference) }
             )
           );
         }
@@ -338,9 +468,31 @@ const checks: { invariant: string; run: Check }[] = [
   },
   {
     invariant: "balance.single_line_per_asset",
-    run: (input) => duplicates(input.storedBalances, balanceKey).map((entry) =>
-      finding("balance.single_line_per_asset", "stored_balance", balanceKey(entry), `Asset held on more than one line for ${entry.account}.`)
-    )
+    run: (input) => duplicates(input.storedBalances, balanceKey).map((entry) => {
+      const lines = input.storedBalances.filter((line) => balanceKey(line) === balanceKey(entry));
+      const amounts = new Set(lines.map((line) => line.balance.trim()));
+      const rootCause =
+        amounts.size > 1
+          ? cause(
+              "concurrent_cache_write",
+              "likely",
+              "The duplicate lines hold different amounts, so two writers cached the same asset at different times without a uniqueness guard.",
+              [`lines=${lines.length}`, `distinct_amounts=${amounts.size}`]
+            )
+          : cause(
+              "duplicate_write_path",
+              "possible",
+              "The duplicate lines are identical; one write path most likely appended instead of replacing.",
+              [`lines=${lines.length}`]
+            );
+      return finding(
+        "balance.single_line_per_asset",
+        "stored_balance",
+        balanceKey(entry),
+        `Asset held on more than one line for ${entry.account}.`,
+        { rootCause }
+      );
+    })
   },
   {
     invariant: "worker_job.state_declared",
@@ -349,7 +501,20 @@ const checks: { invariant: string; run: Check }[] = [
         .filter((job) => !workerJobMachine.isState(job.status))
         .map((job) =>
           finding("worker_job.state_declared", "worker_job", job.id, "Job status is not a declared lifecycle state.", {
-            observed: String(job.status)
+            observed: String(job.status),
+            rootCause:
+              LEGACY_JOB_STATUSES[String(job.status)] !== undefined
+                ? cause(
+                    "legacy_status",
+                    "likely",
+                    `"${String(job.status)}" is a status an older or newer build wrote; it maps to ${LEGACY_JOB_STATUSES[String(job.status)]} in the current lifecycle.`,
+                    [`maps_to=${LEGACY_JOB_STATUSES[String(job.status)]}`]
+                  )
+                : cause(
+                    "bypassed_lifecycle",
+                    "possible",
+                    "A write site set the status directly instead of applying a lifecycle event."
+                  )
           })
         )
   },
@@ -369,7 +534,23 @@ const checks: { invariant: string; run: Check }[] = [
             "worker_job",
             job.id,
             `Job used all ${job.maxAttempts} attempts but is still ${job.status}.`,
-            { expected: "a terminal state", observed: job.status }
+            {
+              expected: "a terminal state",
+              observed: job.status,
+              rootCause: job.lastError
+                ? cause(
+                    "handler_failing",
+                    "likely",
+                    "The handler keeps failing and the exhaust transition was never applied after the last attempt.",
+                    [`last_error=${job.lastError.code}`, `attempts=${job.attempts}`]
+                  )
+                : cause(
+                    "attempt_counter_drift",
+                    "possible",
+                    "The attempt counter reached the budget with no recorded error, so the counter was probably advanced outside the worker.",
+                    [`attempts=${job.attempts}`, `max_attempts=${job.maxAttempts}`]
+                  )
+            }
           )
         )
   },
@@ -378,33 +559,73 @@ const checks: { invariant: string; run: Check }[] = [
     run: (input) => {
       const pending = input.jobs.filter((job) => job.status === "queued" || job.status === "retrying");
       return duplicates(pending.filter((job) => job.dedupeKey !== undefined), (job) => job.dedupeKey!).map(
-        (job) =>
-          finding("worker_job.dedupe_unique", "worker_job", job.id, `Two pending jobs share dedupe key ${job.dedupeKey}.`, {
-            observed: job.dedupeKey
-          })
+        (job) => {
+          const twins = pending.filter((other) => other.dedupeKey === job.dedupeKey && other.id !== job.id);
+          const sameRequest = twins.some((other) => other.correlationId === job.correlationId);
+          return finding("worker_job.dedupe_unique", "worker_job", job.id, `Two pending jobs share dedupe key ${job.dedupeKey}.`, {
+            observed: job.dedupeKey,
+            rootCause: sameRequest
+              ? cause(
+                  "double_submit",
+                  "likely",
+                  "Both jobs carry the same correlation id, so one request enqueued twice — usually a retried submit without an idempotency key.",
+                  [`pending_with_key=${twins.length + 1}`]
+                )
+              : cause(
+                  "missing_idempotency_key",
+                  "possible",
+                  "Two independent enqueue paths used the same dedupe key; the dedupe check raced because neither path claimed an idempotency key.",
+                  [`pending_with_key=${twins.length + 1}`]
+                )
+          });
+        }
       );
     }
   },
   {
     invariant: "worker_job.progress",
     run: (input) => {
-      const staleAfter = input.staleAfterMs ?? 5 * 60 * 1_000;
-      return input.jobs
-        .filter((job) => {
-          if (job.status !== "queued" && job.status !== "retrying") return false;
-          const reference = job.nextAttemptAt ?? job.enqueuedAt;
-          const at = Date.parse(reference);
-          return Number.isFinite(at) && input.now - at > staleAfter;
-        })
-        .map((job) =>
-          finding(
-            "worker_job.progress",
-            "worker_job",
-            job.id,
-            `Job has been ${job.status} past its deadline.`,
-            { observed: job.status }
-          )
-        );
+      const staleAfter = staleAfterOf(input);
+      const pending = input.jobs.filter((job) => job.status === "queued" || job.status === "retrying");
+      const stale = pending.filter((job) => {
+        const reference = job.nextAttemptAt ?? job.enqueuedAt;
+        const at = Date.parse(reference);
+        return Number.isFinite(at) && input.now - at > staleAfter;
+      });
+      // When every pending job is overdue nothing is draining the queue; one
+      // overdue job among moving ones is a scheduling gap for that job alone.
+      const queueStalled = stale.length > 1 && stale.length === pending.length;
+      return stale.map((job) =>
+        finding(
+          "worker_job.progress",
+          "worker_job",
+          job.id,
+          `Job has been ${job.status} past its deadline.`,
+          {
+            observed: job.status,
+            rootCause: queueStalled
+              ? cause(
+                  "scheduler_not_draining",
+                  "likely",
+                  "Every pending job is past its deadline, so no worker is draining the queue; check the scheduler before touching any single job.",
+                  [`stale=${stale.length}`, `pending=${pending.length}`]
+                )
+              : job.status === "retrying"
+                ? cause(
+                    "backoff_not_rescheduled",
+                    "possible",
+                    "Other jobs are moving, so this one's retry was most likely never rescheduled after its backoff elapsed.",
+                    [`attempts=${job.attempts}`]
+                  )
+                : cause(
+                    "job_not_picked_up",
+                    "possible",
+                    "Other jobs are moving, so this job was probably enqueued with a delay or to an operation no handler is registered for.",
+                    [`operation=${job.operation}`]
+                  )
+          }
+        )
+      );
     }
   },
   {
@@ -421,12 +642,28 @@ const checks: { invariant: string; run: Check }[] = [
               "idempotency_record",
               record.key,
               `Expired ${record.status} record was never swept.`,
-              { expected: "swept", observed: record.status }
+              {
+                expected: "swept",
+                observed: record.status,
+                rootCause: cause(
+                  "sweep_not_scheduled",
+                  "likely",
+                  "The record outlived its TTL, so idempotency.sweep() has not run since it expired.",
+                  [`expired_s=${Math.round((input.now - expiresAt) / 1_000)}`]
+                )
+              }
             )
           );
         } else if (record.status === "in_flight" && input.now > Date.parse(record.createdAt) && record.replays === 0) {
           findings.push(
-            finding("idempotency.claim_fresh", "idempotency_record", record.key, "Claim never settled.")
+            finding("idempotency.claim_fresh", "idempotency_record", record.key, "Claim never settled.", {
+              rootCause: cause(
+                "claim_abandoned",
+                "possible",
+                "The claim is still in flight with no replay; the process that claimed it most likely crashed before recording an outcome. The work may still be running.",
+                [`operation=${record.operation}`]
+              )
+            })
           );
         }
       }
@@ -444,7 +681,24 @@ const checks: { invariant: string; run: Check }[] = [
             "export_envelope",
             envelope.correlationId,
             "Envelope recordCount does not match the records it carries.",
-            { expected: String(envelope.records.length), observed: String(envelope.recordCount) }
+            {
+              expected: String(envelope.records.length),
+              observed: String(envelope.recordCount),
+              rootCause:
+                envelope.records.length < envelope.recordCount
+                  ? cause(
+                      "truncated_write",
+                      "likely",
+                      "The envelope carries fewer records than it declares, so the write was cut off after the header was sealed.",
+                      [`missing_records=${envelope.recordCount - envelope.records.length}`]
+                    )
+                  : cause(
+                      "count_not_updated",
+                      "likely",
+                      "The envelope carries more records than it declares, so records were appended after the header was sealed.",
+                      [`extra_records=${envelope.records.length - envelope.recordCount}`]
+                    )
+            }
           )
         )
   },
@@ -457,7 +711,13 @@ const checks: { invariant: string; run: Check }[] = [
           return Number.isFinite(expiresAt) && input.now > expiresAt;
         })
         .map((envelope) =>
-          finding("export_envelope.retention", "export_envelope", envelope.correlationId, "Envelope is past its expiry and still stored.")
+          finding("export_envelope.retention", "export_envelope", envelope.correlationId, "Envelope is past its expiry and still stored.", {
+            rootCause: cause(
+              "retention_sweep_missing",
+              "likely",
+              "The envelope passed expiresAt and was never expired through its lifecycle, so the retention sweep is not running."
+            )
+          })
         )
   },
   {
@@ -467,7 +727,12 @@ const checks: { invariant: string; run: Check }[] = [
         .filter((notification) => !notificationMachine.isState(notification.state))
         .map((notification) =>
           finding("notification.state_declared", "notification", notification.id, "Notification state is not declared.", {
-            observed: String(notification.state)
+            observed: String(notification.state),
+            rootCause: cause(
+              "bypassed_lifecycle",
+              "likely",
+              "A write site set the state directly instead of applying a notification lifecycle event."
+            )
           })
         )
   },
@@ -475,13 +740,19 @@ const checks: { invariant: string; run: Check }[] = [
     invariant: "notification.identity_unique",
     run: (input) => duplicates(input.notifications, (notification) => `${notification.recipient}|${notification.id}`).map(
       (notification) =>
-        finding("notification.identity_unique", "notification", notification.id, "Two entries share one notification id.")
+        finding("notification.identity_unique", "notification", notification.id, "Two entries share one notification id.", {
+          rootCause: cause(
+            "double_publish",
+            "likely",
+            "The same notification was published twice for one recipient, usually two workflows reacting to one event without a shared dedupe key."
+          )
+        })
     )
   },
   {
     invariant: "operation.settles",
     run: (input) => {
-      const staleAfter = input.staleAfterMs ?? 5 * 60 * 1_000;
+      const staleAfter = staleAfterOf(input);
       return input.operations
         .filter((record) => {
           if (operationMachine.isTerminal(record.state)) return false;
@@ -491,7 +762,14 @@ const checks: { invariant: string; run: Check }[] = [
         })
         .map((record) =>
           finding("operation.settles", "operation", record.id, `Operation ${record.op} never settled.`, {
-            observed: record.state
+            observed: record.state,
+            rootCause: operationMachine.isState(record.state)
+              ? cause(
+                  "process_interrupted",
+                  "possible",
+                  "The operation started and never recorded an outcome; the tab or process was most likely closed mid-flight."
+                )
+              : cause("unknown_state", "likely", "The operation carries a state the operation lifecycle does not declare.")
           })
         );
     }
@@ -638,6 +916,9 @@ export function formatReport(report: ReconciliationReport): string {
     lines.push(`      ${entry.detail}`);
     if (entry.expected !== undefined || entry.observed !== undefined) {
       lines.push(`      expected ${entry.expected ?? "-"} / observed ${entry.observed ?? "-"}`);
+    }
+    if (entry.rootCause) {
+      lines.push(`      cause: ${entry.rootCause.code} (${entry.rootCause.confidence}) ${entry.rootCause.hint}`);
     }
     lines.push(`      repair: ${entry.repair}`);
   }

@@ -77,14 +77,14 @@ npm run new:feature          # scaffold a complete feature slice
 npm run verify:features      # check every slice against the feature contract
 npm run verify:issues        # check 40+ independent issues and the advanced wave
 npm run verify:telemetry     # verify >= 5 operations are instrumented
-npm run verify:reconciliation # every invariant is checked and the dry run is read-only
+npm run verify:reconciliation # every invariant is checked, the dry run is read-only, repair is dry-run-first
 npm run verify:contract      # run the API contract drift tests
 npm run verify:replay        # versioned event replay suite
 npm run verify:replay-concurrency # deterministic concurrent-write and retry replay tests
 npm run test:workers         # run the background worker suite
 npm test -- core/lifecycle   # allowed and rejected record state transitions
 npm test -- core/idempotency # retry, replay, expiry and key collisions
-npm test -- core/reconciliation # drift scenarios and the read-only guarantee
+npm test -- core/reconciliation # drift, root-cause hints, repair plan/apply/rollback
 npm run issues               # preview the next five GrantFox issue payloads
 npm run test                 # unit, hook, component and accessibility tests
 npm run test:e2e              # full Playwright suite

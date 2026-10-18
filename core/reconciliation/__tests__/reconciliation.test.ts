@@ -399,6 +399,153 @@ describe("reconciliation dry run", () => {
   });
 });
 
+describe("reconciliation root-cause hints", () => {
+  beforeEach(() => {
+    setTelemetrySink({ emit: () => undefined });
+  });
+
+  const old = new Date(NOW - 3_600_000).toISOString();
+  const envelope = (overrides: Record<string, unknown> = {}) => ({
+    schemaVersion: "1.0",
+    scope: "own" as const,
+    generatedAt: old,
+    expiresAt: new Date(NOW + 3_600_000).toISOString(),
+    generator: "utix-export@1",
+    correlationId: "corr-env",
+    recordCount: 0,
+    page: 1,
+    totalRecords: 0,
+    nextCursor: null,
+    hasMore: false,
+    records: [],
+    ...overrides
+  });
+
+  /** One snapshot that trips every declared invariant at least once. */
+  function everyInvariant(): ReconciliationInput {
+    return snapshot({
+      storedBalances: [
+        { account: "G1", asset: "USDC", balance: "10.50", cachedAt: old },
+        { account: "G1", asset: "EURC", balance: "1" },
+        { account: "G2", asset: "XLM", balance: "1" },
+        { account: "G2", asset: "XLM", balance: "2" }
+      ],
+      ledgerBalances: [
+        { account: "G1", asset: "USDC", balance: "10.51", reference: "ledger:100" },
+        { account: "G2", asset: "XLM", balance: "1", reference: "ledger:100" }
+      ],
+      jobs: [
+        job({ id: "job-moving" }),
+        job({ id: "job-legacy", status: "completed" as JobPayload["status"] }),
+        job({ id: "job-budget", status: "retrying", attempts: 3, lastError: { code: "boom", message: "x" } }),
+        job({ id: "job-dupe-a", dedupeKey: "daily" }),
+        job({ id: "job-dupe-b", dedupeKey: "daily" }),
+        job({ id: "job-stuck", status: "retrying", attempts: 1, nextAttemptAt: old })
+      ],
+      notifications: [notification({ state: "snoozed" as Notification["state"] }), notification({ id: "n2" }), notification({ id: "n2" })],
+      idempotencyRecords: [
+        {
+          key: "expired-key-01",
+          operation: "export.generate",
+          requestHash: "h",
+          status: "completed",
+          createdAt: old,
+          expiresAt: new Date(NOW - 60_000).toISOString(),
+          replays: 0,
+          correlationId: "c"
+        }
+      ],
+      exportEnvelopes: [
+        envelope({ recordCount: 2, records: [{ op: "a" }] }),
+        envelope({ correlationId: "corr-env-old", expiresAt: new Date(NOW - 60_000).toISOString() })
+      ],
+      operations: [{ id: "op-1", op: "horizon.request", state: "started", startedAt: old, correlationId: "c" }],
+      staleAfterMs: 60_000
+    });
+  }
+
+  it("attaches a root-cause hint to every finding of every invariant", () => {
+    const report = reconcile(everyInvariant());
+    expect(new Set(report.findings.map((entry) => entry.invariant))).toEqual(
+      new Set(RECONCILIATION_INVARIANTS.map((entry) => entry.id))
+    );
+    for (const entry of report.findings) {
+      expect(entry.rootCause, entry.id).toBeDefined();
+      expect(entry.rootCause!.code).toMatch(/^[a-z_]+$/);
+      expect(["likely", "possible"]).toContain(entry.rootCause!.confidence);
+      expect(entry.rootCause!.hint.length).toBeGreaterThan(10);
+    }
+    expect(kindsOf(report.findings)).toEqual(["duplicate", "inconsistent", "missing", "stale"]);
+  });
+
+  it("explains a balance drift from the cache age and the ledger shape", () => {
+    const causes = (input: ReconciliationInput) =>
+      Object.fromEntries(reconcile(input).findings.map((entry) => [entry.id, entry.rootCause?.code]));
+
+    expect(causes(everyInvariant())).toMatchObject({
+      "balance.amount_agrees:G1|USDC": "cache_stale",
+      "balance.ledger_entry_present:G1|EURC": "trustline_removed",
+      "balance.single_line_per_asset:G2|XLM": "concurrent_cache_write"
+    });
+    expect(
+      causes(snapshot({ storedBalances: [{ account: "G1", asset: "USDC", balance: "1" }] }))
+    ).toEqual({ "balance.ledger_entry_present:G1|USDC": "ledger_read_empty" });
+    expect(
+      causes(
+        snapshot({
+          storedBalances: [{ account: "G1", asset: "USDC", balance: "1.000000049" }],
+          ledgerBalances: [{ account: "G1", asset: "USDC", balance: "1.0000000", reference: "l" }]
+        })
+      )
+    ).toEqual({ "balance.amount_agrees:G1|USDC": "precision_mismatch" });
+    expect(
+      causes(
+        snapshot({
+          storedBalances: [{ account: "G1", asset: "USDC", balance: "1", cachedAt: new Date(NOW - 1_000).toISOString() }],
+          ledgerBalances: [{ account: "G1", asset: "USDC", balance: "2", reference: "l" }]
+        })
+      )
+    ).toEqual({ "balance.amount_agrees:G1|USDC": "write_race" });
+  });
+
+  it("tells a stalled scheduler apart from one stuck job", () => {
+    const stalled = reconcile(
+      snapshot({
+        jobs: [job({ id: "a", enqueuedAt: old }), job({ id: "b", enqueuedAt: old })],
+        staleAfterMs: 60_000
+      })
+    );
+    expect(stalled.findings.map((entry) => entry.rootCause?.code)).toEqual([
+      "scheduler_not_draining",
+      "scheduler_not_draining"
+    ]);
+
+    const single = reconcile(everyInvariant()).findings.find((entry) => entry.id === "worker_job.progress:job-stuck");
+    expect(single?.rootCause?.code).toBe("backoff_not_rescheduled");
+  });
+
+  it("explains job, envelope and notification drift", () => {
+    const byId = Object.fromEntries(reconcile(everyInvariant()).findings.map((entry) => [entry.id, entry.rootCause]));
+    expect(byId["worker_job.state_declared:job-legacy"]).toMatchObject({ code: "legacy_status", confidence: "likely" });
+    expect(byId["worker_job.budget_consistent:job-budget"]?.evidence).toContain("last_error=boom");
+    expect(byId["worker_job.dedupe_unique:job-dupe-b"]?.code).toBe("double_submit");
+    expect(byId["export_envelope.count_matches:corr-env"]?.code).toBe("truncated_write");
+    expect(byId["notification.identity_unique:n2"]?.code).toBe("double_publish");
+  });
+
+  it("renders the cause in the CI report and scrubs secrets from it", () => {
+    const secret = `S${"B".repeat(55)}`;
+    const report = reconcile(
+      snapshot({
+        storedBalances: [{ account: "G1", asset: "USDC", balance: "1", cachedAt: old }],
+        ledgerBalances: [{ account: "G1", asset: "USDC", balance: "2", reference: `ledger:${secret}` }]
+      })
+    );
+    expect(formatReport(report)).toContain("cause: cache_stale (likely)");
+    expect(JSON.stringify(report)).not.toContain(secret);
+  });
+});
+
 describe("reconciliation worker job", () => {
   beforeEach(() => {
     setTelemetrySink({ emit: () => undefined });

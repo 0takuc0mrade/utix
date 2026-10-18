@@ -9,7 +9,10 @@
  *    engine, so an invariant can never be declared and then never run;
  * 2. the engine and its job have no write path — no storage writes, no
  *    assignment into a snapshot field — so a dry run is safe in CI;
- * 3. the four drift kinds the report promises are all reachable.
+ * 3. the four drift kinds the report promises are all reachable;
+ * 4. every invariant has a repair strategy (an action kind or `manual`), and
+ *    the repair path keeps its dry-run-first guards: a confirmation, a fresh
+ *    re-read that refuses a stale plan, and a rollback on failure.
  *
  * Run with: npm run verify:reconciliation
  */
@@ -23,12 +26,21 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ENGINE = path.join(root, "core", "reconciliation", "reconciliation.ts");
 const JOB = path.join(root, "core", "reconciliation", "job.ts");
 const TEST = path.join(root, "core", "reconciliation", "__tests__", "reconciliation.test.ts");
+const REPAIR = path.join(root, "core", "reconciliation", "repair.ts");
+const REPAIR_TEST = path.join(root, "core", "reconciliation", "__tests__", "repair.test.ts");
 
 const REQUIRED_KINDS = ["missing", "duplicate", "stale", "inconsistent"];
 
 /** Reads the declared invariant ids straight out of the source. */
 function declaredInvariants(source) {
   return [...source.matchAll(/id:\s*"([a-z_]+\.[a-z_]+)"/g)].map((match) => match[1]);
+}
+
+/** Reads the invariant ids `REPAIR_STRATEGIES` has an entry for. */
+function strategyInvariants(source) {
+  const match = source.match(/REPAIR_STRATEGIES[^=]*=\s*\{([\s\S]*?)\};/);
+  if (!match) return null;
+  return [...match[1].matchAll(/"([a-z_]+\.[a-z_]+)":/g)].map((entry) => entry[1]);
 }
 
 /** Reads the invariant ids the engine's check table references. */
@@ -38,7 +50,13 @@ function checkedInvariants(source) {
 
 export async function findReconciliationViolations(projectRoot = root) {
   const read = (file) => readFile(path.join(projectRoot, path.relative(root, file)), "utf8");
-  const [engine, job, test] = await Promise.all([read(ENGINE), read(JOB), read(TEST)]);
+  const [engine, job, test, repair, repairTest] = await Promise.all([
+    read(ENGINE),
+    read(JOB),
+    read(TEST),
+    read(REPAIR),
+    read(REPAIR_TEST)
+  ]);
   const violations = [];
 
   const declared = new Set(declaredInvariants(engine));
@@ -83,13 +101,50 @@ export async function findReconciliationViolations(projectRoot = root) {
     violations.push("the suite has no test proving the snapshot is not mutated");
   }
 
+  const strategies = strategyInvariants(repair);
+  if (!strategies) {
+    violations.push("core/reconciliation/repair.ts declares no REPAIR_STRATEGIES");
+  } else {
+    for (const id of declared) {
+      if (!strategies.includes(id)) violations.push(`invariant ${id} has no repair strategy (use "manual" if none is safe)`);
+    }
+    for (const id of strategies) {
+      if (!declared.has(id)) violations.push(`repair strategy ${id} targets an undeclared invariant`);
+    }
+  }
+
+  // The guards that make the repair dry-run-first. Removing one silently turns
+  // an approved plan into a blind write.
+  const guards = [
+    [/deps\.confirm !== plan\.planId/, "apply no longer requires the plan id as confirmation"],
+    [/"plan_stale"/, "apply no longer refuses a plan the source has moved past"],
+    [/fingerprintOf\(plan\.actions\) !== plan\.fingerprint/, "apply no longer refuses an edited plan"],
+    [/if \(!mayRepair\(deps\.auth\)\) return refuse\("repair_denied"\)/, "apply no longer checks the repair permission"],
+    [/hasPermission\(auth\.role, REPAIR_PERMISSION\)/, "the repair permission check no longer uses the RBAC table"],
+    [/revertJournal\(/, "a failed apply no longer rolls back"],
+    [/allowIrreversible/, "irreversible actions are no longer opt-in"]
+  ];
+  for (const [pattern, description] of guards) {
+    if (!pattern.test(repair)) violations.push(`core/reconciliation/repair.ts: ${description}`);
+  }
+  // Repair writes go through injected handlers only; it owns no storage.
+  for (const [pattern, description] of [
+    [/\.setItem\(/, "writes to storage directly"],
+    [/\bwriteFile/, "writes a file directly"]
+  ]) {
+    if (pattern.test(repair)) violations.push(`core/reconciliation/repair.ts ${description}; writes go through handlers`);
+  }
+  for (const scenario of ["refuses a stale plan", "rolls back", "never writes during planning"]) {
+    if (!repairTest.includes(scenario)) violations.push(`the repair suite has no "${scenario}" test`);
+  }
+
   return violations;
 }
 
 async function main() {
   const violations = await findReconciliationViolations();
   if (!violations.length) {
-    console.log("[reconciliation] OK: invariants checked, no write path, dry run is read-only.");
+    console.log("[reconciliation] OK: invariants checked, no write path, dry run is read-only, repair is dry-run-first.");
     return;
   }
   console.error("[reconciliation] contract violated:");

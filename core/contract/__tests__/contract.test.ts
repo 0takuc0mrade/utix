@@ -19,6 +19,7 @@ import type { FeatureManifest } from "@/core/registry/types";
 import { stateView, workerJobMachine } from "@/core/lifecycle/records";
 import { createIdempotencyStore } from "@/core/idempotency/idempotency";
 import { reconcile, type ReconciliationInput } from "@/core/reconciliation/reconciliation";
+import { planRepairs } from "@/core/reconciliation/repair";
 import { getAuditTrail, recordAudit, SENSITIVE_ACTIONS } from "@/core/audit/audit";
 import { manifest as paymentQrManifest } from "@/features/payment-qr/manifest";
 import {
@@ -118,7 +119,29 @@ const reconciliationReportContract = contractOperation("reconciliation.report", 
     "summary.total": { type: "number", required: true },
     "summary.inconsistent": { type: "number", required: true },
     "findings.0.invariant": { type: "string", required: false },
-    "findings.0.repair": { type: "string", required: false }
+    "findings.0.repair": { type: "string", required: false },
+    // Additive: present when the snapshot held evidence for a cause.
+    "findings.0.rootCause.code": { type: "string", required: false },
+    "findings.0.rootCause.confidence": { type: "string", required: false }
+  }
+});
+
+const repairPlanContract = contractOperation("reconciliation.repair_plan", {
+  version: V,
+  fields: {
+    planId: { type: "string", required: true },
+    runId: { type: "string", required: true },
+    createdAt: { type: "string", required: true },
+    expiresAt: { type: "string", required: true },
+    dryRun: { type: "boolean", required: true },
+    actions: { type: "array", required: true },
+    manual: { type: "array", required: true },
+    fingerprint: { type: "string", required: true },
+    "summary.actions": { type: "number", required: true },
+    "summary.manual": { type: "number", required: true },
+    "actions.0.id": { type: "string", required: false },
+    "actions.0.kind": { type: "string", required: false },
+    "actions.0.reversible": { type: "boolean", required: false }
   }
 });
 
@@ -236,6 +259,23 @@ describe("contract drift tests", () => {
     const report = reconcile(drift);
     expect(report.dryRun).toBe(true);
     expect(assertContract(reconciliationReportContract, () => report).ok).toBe(true);
+  });
+
+  it("locks the reconciliation repair plan shape", () => {
+    const drift: ReconciliationInput = {
+      storedBalances: [{ account: "G1", asset: "USDC", balance: "10.50" }],
+      ledgerBalances: [{ account: "G1", asset: "USDC", balance: "10.51", reference: "ledger:100" }],
+      jobs: [],
+      notifications: [],
+      idempotencyRecords: [],
+      exportEnvelopes: [],
+      operations: [],
+      now: Date.parse("2026-09-26T00:00:00.000Z")
+    };
+    const plan = planRepairs(reconcile(drift), drift);
+    expect(plan.dryRun).toBe(true);
+    expect(plan.actions[0]?.kind).toBe("recache_balance");
+    expect(assertContract(repairPlanContract, () => plan).ok).toBe(true);
   });
 
   it("locks the audit event shape to what the trail records", () => {

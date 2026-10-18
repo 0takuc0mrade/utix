@@ -45,6 +45,7 @@ cannot disagree about coverage:
 | `notification.published`    | `core/notifications/store.ts` (`publish`)     |
 | `notification.cleared`      | `core/notifications/store.ts` (`clear`)       |
 | `reconciliation.reported`   | `core/reconciliation/job.ts`                  |
+| `reconciliation.repaired`   | `core/reconciliation/repair.ts` (`applyRepairPlan`, `rollbackRepair`) |
 | `idempotency.claim_released`| `core/idempotency/idempotency.ts` (`abandon`) |
 | `quota.override_granted`    | `core/quota/quota.ts` (`grantOverride`)       |
 | `quota.override_revoked`    | `core/quota/quota.ts` (`revokeOverride`)      |

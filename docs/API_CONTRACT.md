@@ -20,6 +20,7 @@ version-negotiated before its payload is read — see
 | `lifecycle.state`   | Derived state view shared by the UI and API responses        |
 | `idempotency.record` | Persisted outcome replayed for a retried write             |
 | `reconciliation.report` | Read-only dry-run drift report                         |
+| `reconciliation.repair_plan` | Dry-run repair plan derived from a report         |
 
 ## Conventions
 
@@ -141,8 +142,10 @@ Codes: `idempotency_key_missing`, `idempotency_key_invalid`,
 
 ## 8. Reconciliation report — `reconciliation.report`
 
-Read-only output of a dry run. `dryRun` is always `true`; there is no repair
-field that mutates anything.
+Read-only output of a dry run. `dryRun` is always `true`; nothing in the report
+mutates anything. Each finding may carry an additive `rootCause`
+(`{ code, confidence, hint, evidence? }`); consumers that ignore unknown fields
+are unaffected.
 
 ```json
 {"runId":"…","startedAt":"2026-09-26T00:00:00.000Z","finishedAt":"2026-09-26T00:00:00.000Z","dryRun":true,"checks":[{"invariant":"balance.amount_agrees","checked":4,"findings":1}],"findings":[{"id":"balance.amount_agrees:G1|USDC","invariant":"balance.amount_agrees","kind":"inconsistent","severity":"critical","subject":"stored_balance","recordId":"G1|USDC","detail":"Stored USDC balance disagrees with ledger reference ledger:100.","expected":"10.51","observed":"10.50","repair":"Treat the ledger as authoritative and re-cache the line. …"}],"summary":{"missing":0,"duplicate":0,"stale":1,"inconsistent":1,"total":2},"clean":false}
@@ -150,6 +153,20 @@ field that mutates anything.
 
 `kind` is one of `missing`, `duplicate`, `stale`, `inconsistent`. See
 [RECONCILIATION.md](./RECONCILIATION.md).
+
+### 8a. Repair plan — `reconciliation.repair_plan`
+
+Output of `planRepairs(report, snapshot)`. A plan is itself a dry run: it
+describes writes and makes none.
+
+```json
+{"planId":"…","runId":"…","createdAt":"2026-09-26T00:00:00.000Z","expiresAt":"2026-09-26T00:15:00.000Z","dryRun":true,"actions":[{"id":"recache_balance:G1|USDC","kind":"recache_balance","findingIds":["balance.amount_agrees:G1|USDC"],"invariant":"balance.amount_agrees","subject":"stored_balance","target":{"account":"G1","asset":"USDC"},"before":{"balance":"10.50","cachedAt":null},"after":{"balance":"10.51","reference":"ledger:100","cachedAt":"2026-09-26T00:00:00.000Z"},"reversible":true,"risk":"low","rollback":"Write `before.balance` back; …"}],"manual":[],"fingerprint":"9f2c…","summary":{"actions":1,"reversible":1,"irreversible":0,"manual":0}}
+```
+
+Applying a plan returns `{ ok: true, value: RepairOutcome }` or one of
+`repair_denied`, `confirmation_required`, `plan_tampered`, `plan_expired`,
+`nothing_selected`, `blast_radius_exceeded`, `handler_missing`,
+`snapshot_unavailable`, `plan_stale`, `repair_failed`.
 
 ## 9. Audit event — `audit.event`
 
@@ -162,7 +179,7 @@ event can never carry a payload.
 
 `action` is one of `record.state_changed`, `record.transition_denied`,
 `export.generated`, `notification.published`, `notification.cleared`,
-`reconciliation.reported`, `idempotency.claim_released`,
+`reconciliation.reported`, `reconciliation.repaired`, `idempotency.claim_released`,
 `quota.override_granted`, `quota.override_revoked`. `outcome` is `allowed`
 or `denied`, in which case `errorCode` carries the refusal. Refused reads:
 

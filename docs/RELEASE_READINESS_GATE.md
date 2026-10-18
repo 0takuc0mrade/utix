@@ -31,7 +31,7 @@ node scripts/release-readiness-gate.mjs --json
    - Verifies incident runbook documentation (`core/incident/runbook.ts`).
 
 4. **Smoke Tests & Invariant Verification Gate**:
-   - Validates read-only dry-run reconciliation contracts (`scripts/verify-reconciliation.mjs`).
+   - Validates dry-run reconciliation and dry-run-first repair contracts (`scripts/verify-reconciliation.mjs`).
    - Validates audit logging coverage (`scripts/verify-audit.mjs`).
    - Validates feature registry consistency.
 
