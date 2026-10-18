@@ -1,0 +1,3 @@
+import { describe, expect, it } from "vitest";
+import { archiveRecord, restoreRecord, type ArchiveRecord, type ArchiveStore } from "@/core/archive";
+describe("lifecycle archival", () => { it("archives and restores idempotently", () => { let value: ArchiveRecord<string> = { id: "r1", schemaVersion: 1, state: "active", value: "safe" }; const store: ArchiveStore<string> = { read: () => value, write: (next) => { value = next; } }; expect(archiveRecord(store, "r1", "2026-01-01").state).toBe("archived"); expect(archiveRecord(store, "r1")).toEqual(value); expect(restoreRecord(store, "r1", "2026-01-02").state).toBe("restored"); }); });

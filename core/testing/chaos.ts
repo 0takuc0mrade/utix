@@ -1,0 +1,3 @@
+export interface ChaosStep { readonly id: string; readonly run: () => void | Promise<void>; }
+export interface ChaosResult { readonly seed: number; readonly completed: readonly string[]; readonly interruptedAt: string | null; }
+export async function runChaosScenario(steps: readonly ChaosStep[], seed: number, interruptAfter: number): Promise<ChaosResult> { const completed: string[] = []; for (let i = 0; i < steps.length; i += 1) { if (i === interruptAfter) return { seed, completed, interruptedAt: steps[i].id }; await steps[i].run(); completed.push(steps[i].id); } return { seed, completed, interruptedAt: null }; }

@@ -1,0 +1,3 @@
+export interface ConcurrentMutation { readonly id: string; readonly read: () => unknown; readonly write: (value: unknown) => void; readonly mutate: (value: unknown) => unknown; }
+export interface RaceReport { readonly lostUpdate: boolean; readonly finalValue: unknown; readonly expectedValue: unknown; }
+export function detectLostUpdate(mutation: ConcurrentMutation): RaceReport { const first = mutation.read(); const second = mutation.read(); const firstNext = mutation.mutate(first); const secondNext = mutation.mutate(second); mutation.write(firstNext); mutation.write(secondNext); return { lostUpdate: Object.is(secondNext, firstNext), finalValue: secondNext, expectedValue: mutation.mutate(firstNext) }; }
