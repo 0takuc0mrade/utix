@@ -55,6 +55,24 @@ describe('Domain Model Invariant Test Suite (#78)', () => {
       expect(violations).toHaveLength(0);
     });
 
+    it('detects actual ticket records exceeding event capacity', () => {
+      const state = createInitialState();
+      const event = state.events.get('event_festival_2026')!;
+      const modifiedTickets = new Map(state.tickets);
+      modifiedTickets.set('ticket_002', {
+        ...modifiedTickets.get('ticket_001')!,
+        id: 'ticket_002',
+        eventId: event.id,
+      });
+
+      const invalidState: DomainState = {
+        ...state,
+        tickets: modifiedTickets,
+      };
+      const violations = DomainInvariantChecker.verifyAll(invalidState);
+
+      expect(violations.some((v) => v.invariantId === 'INV-10')).toBe(true);
+    });
     it('fails when event issuedCount exceeds total venue capacity', () => {
       const state = createInitialState();
       const event = state.events.get('event_festival_2026')!;
