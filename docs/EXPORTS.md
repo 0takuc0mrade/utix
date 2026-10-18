@@ -98,7 +98,9 @@ materialised; without it the stream falls back to `collect`.
 
 `npm run test` covers large exports (5 000 records, paged without loss), empty
 exports, denied (`export_denied`) and unsupported-version exports, redaction,
-and retention expiry — see `core/export/__tests__/exporter.test.ts`.
+and retention expiry — see `core/export/__tests__/exporter.test.ts`. Trend
+aggregation, date ranges, empty data, permission denial and a 5 000 event
+paged export are covered in `core/export/__tests__/trends.test.ts`.
 
 Each export emits `export.generate` and `export.authorize` telemetry; see
 [docs/TELEMETRY.md](./TELEMETRY.md).

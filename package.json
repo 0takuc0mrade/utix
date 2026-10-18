@@ -46,7 +46,8 @@
     "bundle:check": "node scripts/bundle-budget.mjs",
     "diagnostics:contributor": "node --loader ./scripts/loader.mjs scripts/contributor-diagnostics.mjs",
     "doctor": "node --loader ./scripts/loader.mjs scripts/contributor-diagnostics.mjs",
-    "verify:issues-264-275": "node --loader ./scripts/loader.mjs scripts/verify-issues-264-275.mjs"
+    "verify:issues-264-275": "node --loader ./scripts/loader.mjs scripts/verify-issues-264-275.mjs",
+    "backfill": "node --loader ./scripts/loader.mjs scripts/backfill.mjs"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^13.3.0",
