@@ -39,6 +39,8 @@
     "issues": "node scripts/create-issues.mjs",
     "issues:drips": "node scripts/create-issues.mjs --target drips",
     "recovery:validate": "node scripts/validate-recovery.mjs",
+    "rollback:verify": "node scripts/verify-release-rollback.mjs",
+    "drill:run": "node scripts/run-incident-drill.mjs",
     "health:check": "node scripts/health-check.mjs",
     "bundle:check": "node scripts/bundle-budget.mjs",
     "diagnostics:contributor": "node --loader ./scripts/loader.mjs scripts/contributor-diagnostics.mjs",
