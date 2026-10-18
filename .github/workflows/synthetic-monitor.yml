@@ -1,0 +1,36 @@
+name: Synthetic monitor
+
+# Probes the critical journey (account operation history and its older page)
+# against live Horizon. See docs/OPERATIONAL_HEALTH.md#synthetic-monitoring-269.
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Critical journey (${{ matrix.network }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        network: [testnet, mainnet]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      # The probe imports no npm packages, so no install step is needed.
+      - name: Run synthetic monitor
+        env:
+          UTIX_USER_ROLE: service
+        run: npm run synthetic:monitor -- --network ${{ matrix.network }}

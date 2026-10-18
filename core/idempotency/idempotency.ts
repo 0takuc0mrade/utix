@@ -137,14 +137,33 @@ function browserStorage(): IdempotencyStorage {
   return new MemoryStorage();
 }
 
-/** Sorted-key JSON, so `{a:1,b:2}` and `{b:2,a:1}` hash identically. */
+/**
+ * Sorted-key JSON, so `{a:1,b:2}` and `{b:2,a:1}` hash identically.
+ *
+ * Total over any input: a BigInt is written with its `n` suffix and a cycle as
+ * `#cycle`. Neither token is valid JSON, so neither collides with a JSON value,
+ * and every input `JSON.stringify` accepts keeps its previous form. Tracking
+ * only the current path (not every visited node) keeps shared, acyclic
+ * references expanded as before. O(n) time, O(depth) extra space.
+ */
 export function canonicalize(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, entry]) => entry !== undefined)
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
-  return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalize(entry)}`).join(",")}}`;
+  const path = new Set<object>();
+  const visit = (node: unknown): string => {
+    if (typeof node === "bigint") return `${node}n`;
+    if (node === null || typeof node !== "object") return JSON.stringify(node) ?? "null";
+    if (path.has(node)) return "#cycle";
+    path.add(node);
+    const body = Array.isArray(node)
+      ? `[${node.map(visit).join(",")}]`
+      : `{${Object.entries(node as Record<string, unknown>)
+          .filter(([, entry]) => entry !== undefined)
+          .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+          .map(([key, entry]) => `${JSON.stringify(key)}:${visit(entry)}`)
+          .join(",")}}`;
+    path.delete(node);
+    return body;
+  };
+  return visit(value);
 }
 
 /** FNV-1a over the canonical form. A digest, not a signature. */

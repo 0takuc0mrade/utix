@@ -1,6 +1,6 @@
 export { NotificationCenter } from "@/core/notifications/NotificationCenter";
 export { NotificationProvider, useNotifications } from "@/core/notifications/NotificationProvider";
-export { NotificationStore } from "@/core/notifications/store";
+export { NotificationStore, StalePreferencesVersionError } from "@/core/notifications/store";
 export type {
   Notification,
   NotificationEvent,

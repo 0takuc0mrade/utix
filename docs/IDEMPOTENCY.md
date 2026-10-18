@@ -124,3 +124,48 @@ mint a second artifact.
 npm test -- core/idempotency   # replay, expiry, in-flight, collision, sweep
 npm test -- core/workers core/export
 ```
+
+## Concurrency: duplicate submissions and stale versions (#271)
+
+`withIdempotency` claims its key **synchronously**, before its first `await`.
+In one JavaScript realm, the first of two concurrent submissions always owns
+the work, and the second gets `idempotency_in_flight`. The executable spec is in
+`core/idempotency/__tests__/idempotency.concurrency.test.ts`:
+
+| Scenario | Outcome |
+| :--- | :--- |
+| Same key, same payload, concurrently | One run; duplicate gets `idempotency_in_flight` |
+| Retry after the first settled | Recorded outcome replayed; work count stays 1 |
+| Two tabs sharing one storage | Same as above: the claim is in shared storage |
+| First attempt failed or threw | Failure is recorded and replayed, never re-run |
+| Claim stuck in flight | Only `abandon()` (audited) frees the key for a re-run |
+| Same key, different payload or operation | `idempotency_key_conflict`, no replay of another's outcome |
+| Duplicate after the TTL | `idempotency_key_expired`, never a silent second run |
+
+Stale versions are covered in
+`core/notifications/__tests__/preferences.concurrency.test.ts`.
+`NotificationStore.updatePreferences` accepts an optional third argument,
+`{ expectedVersion }`. When it is given and the stored `version` differs, the
+write throws `StalePreferencesVersionError` (`recipient`, `expectedVersion`,
+`actualVersion`) and storage is left unchanged. The caller re-reads, recomputes
+its patch and retries.
+
+### Edge cases
+
+- **Cross-tab atomicity** is only as strong as `localStorage`. Browsers do not
+  lock it across tabs, so two tabs that read the key in the same instant can both
+  claim it. The in-realm guarantees above are exact. Cross-process exactly-once
+  needs a store with compare-and-set behind `IdempotencyStorage`.
+- **Corrupt stored preferences** fall back to defaults (`version: 1`), so a
+  writer passing `expectedVersion: 1` recovers instead of being locked out.
+
+### Migration and rollback
+
+`expectedVersion` is optional, and omitting it keeps the previous last-write-wins
+behaviour, so no existing caller changes. Rolling back removes the option and
+the error class. Stored data is unaffected because the record shape and storage
+keys are unchanged.
+
+```bash
+npm test -- core/idempotency core/notifications
+```

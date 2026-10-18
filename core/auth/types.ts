@@ -36,7 +36,9 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
 };
 
 export function hasPermission(role: Role, permission: Permission): boolean {
-  return ROLE_PERMISSIONS[role].includes(permission);
+  // An unrecognised role (e.g. a mistyped UTIX_USER_ROLE) is denied, never a
+  // crash; `hasOwn` keeps prototype keys such as `toString` from resolving.
+  return Object.hasOwn(ROLE_PERMISSIONS, role) && ROLE_PERMISSIONS[role].includes(permission);
 }
 
 export function hasAnyPermission(role: Role, permissions: Permission[]): boolean {

@@ -122,7 +122,8 @@ export function parseJsonRpcResponse<T>(
     if (
       err === null ||
       typeof err !== "object" ||
-      typeof (err as Record<string, unknown>).code !== "number" ||
+      // JSON-RPC 2.0 §5.1: the error code MUST be an integer.
+      !Number.isInteger((err as Record<string, unknown>).code) ||
       typeof (err as Record<string, unknown>).message !== "string"
     ) {
       return {
@@ -130,7 +131,7 @@ export function parseJsonRpcResponse<T>(
         id: rawId,
         error: {
           code: RPC_STANDARD_CODES.INVALID_REQUEST,
-          message: "Malformed JSON-RPC response: error field must be an object with numeric code and string message",
+          message: "Malformed JSON-RPC response: error field must be an object with integer code and string message",
           data: err
         }
       };

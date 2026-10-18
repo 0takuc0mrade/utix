@@ -42,6 +42,7 @@
     "rollback:verify": "node scripts/verify-release-rollback.mjs",
     "drill:run": "node scripts/run-incident-drill.mjs",
     "health:check": "node scripts/health-check.mjs",
+    "synthetic:monitor": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/synthetic-monitor.mjs",
     "bundle:check": "node scripts/bundle-budget.mjs",
     "diagnostics:contributor": "node --loader ./scripts/loader.mjs scripts/contributor-diagnostics.mjs",
     "doctor": "node --loader ./scripts/loader.mjs scripts/contributor-diagnostics.mjs",
