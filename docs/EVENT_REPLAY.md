@@ -57,7 +57,7 @@ event durably folded into the slot.
 | `unsupported_event_version` | No upcaster path, or event newer than the projection        | No, and **never skipped** — it is a deploy gap, not bad data | Register the missing upcaster or bump `eventVersions`, then `resume`. |
 | `sequence_out_of_order`     | Source returned a sequence ≤ the checkpoint (duplicate or reorder) | No | Source bug; fix it before resuming. Gaps in the sequence are fine. |
 | `validation_failed`         | `validate(state)` reported violations                       | No       | Slot is left `failed` with its state for inspection; nothing is promoted. |
-| `replay_in_progress`        | Another run holds the projection lock                       | No       | Wait, or let the lock expire (`lockTtlMs`, default 5 min). |
+| `replay_in_progress`        | Another run holds the projection lock, or this run lost it after a pause | No | Wait for the owner. A run that lost the lock writes nothing, so `resume` continues from the owner's checkpoint. |
 | `version_active`            | `rebuild` targeted the live version                         | No       | Bump the projection version, or use `resume` to catch up. |
 | `nothing_to_resume`         | `resume` with no slot for that version                      | No       | Use `rebuild`. |
 | `replay_unauthorized`       | Caller lacks `admin:replay`                                 | No       | Audited with outcome `denied`. |
@@ -66,15 +66,35 @@ event durably folded into the slot.
 ## Operational edge cases
 
 - **Crash mid-run.** The staging slot is written after every batch, so at most
-  one batch is replayed again on `resume`. The lock is refreshed after each
+  one batch is replayed again on `resume`. The lock is refreshed before each
   batch and expires after `lockTtlMs`; a crashed run blocks others for at most
-  that long. Choose `lockTtlMs` comfortably above the time of one batch.
+  that long. Choose `lockTtlMs` comfortably above one batch plus its retry
+  budget.
 - **Events appended during a rebuild.** The runner reads until the source
   returns an empty batch, so a promoted slot is caught up to the moment of
   promotion. Events after that are the live projector's job, starting from the
   slot's `checkpoint`; `resume` on the live version does the same thing on demand.
+  A write that becomes visible before the final empty read is included; a write
+  that lands after promotion is not silently folded into that build.
+- **Concurrent replays.** The lock is per projection name, not per version, so a
+  rebuild of `balances@v2` and a catch-up of the live `balances@v1` serialise,
+  while different projections run concurrently. A `dryRun` takes no lock and
+  writes nothing, so it can be used for a read-only comparison beside a build.
+- **A run that loses its lock stops without writing.** The lock is re-checked
+  before every slot write and before the final ready/promote commit. If this
+  process paused past `lockTtlMs` and another run acquired the lock, the stale
+  run returns `replay_in_progress` and leaves the new owner's slot untouched —
+  it does not even write a `failed` marker over it. If the lock expired but no
+  one took it, the same owner simply reacquires it and continues.
+- **Promotion and rollback are pointer writes, not lock-protected.**
+  `promoteProjection` and `rollbackProjection` perform one atomic `setActive`;
+  they do not take the replay lock. Operator tooling must serialise a pointer
+  change with a running replay, because the last pointer write wins. Only a
+  `ready` slot can be a target, so a failed or half-built version can never be
+  promoted or rolled back to.
 - **Retries are per read, not per run.** `report.retries` is the total across
-  the run; a flapping source can succeed overall while still retrying.
+  the run; a flapping source can succeed overall while still retrying. A retry
+  does not release the lock, so a competing run cannot slip between attempts.
 - **Skipped events are permanent holes** in that build. They are listed in
   `report.skipped` and counted in the audit event; the default `maxSkipped` is 0.
 - **Ignored and skipped events advance the checkpoint**; a halted event does not.
@@ -82,7 +102,50 @@ event durably folded into the slot.
   running total across resumes.
 - **The store contract.** `createMemoryProjectionStore` is the reference. A
   durable adapter must make `putSlot`, `setActive` and `acquireLock` each atomic
-  on their own; `setActive` is the commit point of a promotion.
+  on their own; `setActive` is the commit point of a promotion. `acquireLock`
+  must return `false` for a live owner other than the caller, and the runner
+  treats that as “stop, write nothing”.
+
+## Deterministic concurrency and retry tests
+
+The replay suite has two layers:
+
+| File | What it proves |
+| --- | --- |
+| `core/replay/__tests__/replay.test.ts` | The normal, failure, retry, authorization and rollback contracts. |
+| `core/replay/__tests__/replay.deterministic.test.ts` | The same paths under interleaved writes, lock contention and scripted source failures. |
+
+Run the focused suite with `npm run verify:replay-concurrency`, or run both
+with `npm run verify:replay` / `npm test -- core/replay`.
+
+The deterministic harness (`__tests__/deterministicHarness.ts`) removes the two
+sources of flakiness in a concurrency test:
+
+- **Time.** Every run gets an injected clock; no test waits or reads
+  `Date.now()`. Advancing the clock is an explicit step, so lock expiry and TTL
+  refresh are deterministic.
+- **Ordering.** An append-only log exposes scripted write windows: events are
+  appended immediately before a chosen read attempt, so a write lands at an
+  exact point in the replay. A seeded PRNG (`mulberry32`) places the same writes
+  in different windows or generates the same plan twice. Source failures are
+  scripted by read index, so the retry/backoff trace is reproducible.
+
+The matrix below is covered:
+
+| Path | Interleaving under test |
+| --- | --- |
+| Normal rebuild | Writes appended while source reads are in flight; the final state equals a serial fold and the checkpoint reaches the head. |
+| Point-in-time rebuild | `untilSequence` ignores writes appended after the snapshot. |
+| Determinism | The same seed produces an identical read trace, backoff schedule, apply order and slot; the same writes in different windows converge to one state. |
+| Lock contention | Two simultaneous rebuilds: one wins, the loser reads nothing and writes nothing; it can resume after the lock is released. |
+| Lock scope | Different projections run concurrently; the same projection serialises rebuild and catch-up. |
+| Lost lock | A run that pauses past its TTL and loses the lock to a new owner stops with `replay_in_progress` and does not overwrite that owner's slot. |
+| Retrying lock | A source failure backs off while the lock stays owned; a competitor is refused between attempts. |
+| Poison event | A halt leaves the last good checkpoint; a resume after the forward fix includes writes appended during the halt. |
+| Racing source | A duplicate/out-of-order sequence is refused and the slot stays unpromoted. |
+| Retry exhaustion | The checkpoint is durable; a second run resumes from it and converges over writes the first run never saw. |
+| Authorization | Viewer/service runs are refused before they can take the lock, and a denied rollback cannot race an authorized promotion. |
+| Rollback recovery | Rollback restores the previous ready checkpoint; resuming it catches up over writes appended after the rollback. |
 
 ## Rollback
 
@@ -125,3 +188,9 @@ This is additive; no existing contract changes:
   register an `Upcaster` from the old version, and bump the projection's
   `eventVersions` entry and `version`. Rebuild, promote; keep the old slot until
   you are confident, then roll back with one call if needed.
+- **Lock ownership is now re-checked before every slot write.** This tightens
+  behaviour for a run that outlives its lock; it adds no error code (`replay_in_progress`
+  already existed), record shape or permission. Existing callers need no change.
+  A durable `ProjectionStore` adapter must implement `acquireLock` atomically
+  and return `false` when another live owner holds the lock. There is no data
+  migration: failed/lost-lock runs now simply leave the slot to the new owner.
