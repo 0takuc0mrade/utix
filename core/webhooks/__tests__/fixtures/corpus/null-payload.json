@@ -1,0 +1,15 @@
+{
+  "name": "null-payload",
+  "description": "The payload is null.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    null
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Malformed webhook message: message must be an object"
+    }
+  ]
+}

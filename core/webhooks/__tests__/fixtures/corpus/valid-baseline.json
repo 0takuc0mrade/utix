@@ -1,0 +1,30 @@
+{
+  "name": "valid-baseline",
+  "description": "A correctly signed, in-window message is accepted.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "252a1d540a27cd73e5291305879cd6a35d7afaf7b8939ad66ca81756d4a83ddf"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": true
+    }
+  ]
+}

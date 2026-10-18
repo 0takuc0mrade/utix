@@ -1,0 +1,24 @@
+{
+  "name": "missing-signature-object",
+  "description": "The signature object is absent.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Malformed webhook message: missing signature"
+    }
+  ]
+}

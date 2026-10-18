@@ -143,6 +143,28 @@ to the request or job that caused it in the telemetry sink.
 - Add a rule to the table rather than branching on a status string. A branch is
   exactly the implicit-state check this module replaced.
 
+## Transition matrix tests
+
+`core/lifecycle/__tests__/stateMachineMatrix.test.ts` runs against every
+machine in `RECORD_MACHINES`, so a new record kind is covered automatically:
+
+- every `(state, event)` pair resolves to the declared target or to
+  `invalid_transition` / `terminal_state`, never anything else;
+- terminal states are exactly the states with no outgoing rule, and reject every
+  event with `terminal_state`;
+- every state is reachable from the initial state and can reach a terminal
+  state, so a record cannot be stuck;
+- recovery paths are walked end to end (`running -fail-> retrying -start->
+  running -succeed-> succeeded`, `retrying -retry-> queued`, repeated `fail`
+  until `exhaust`), and `succeeded`, `dead_lettered`, `purged` and the settled
+  ownership states offer none;
+- unknown or malformed states and events get `unknown_state` / `unknown_event`.
+
+Failure mode: a table edit that adds a rule out of a terminal state throws in
+`createLifecycle`; one that strands a state fails the reachability tests.
+Rollback is reverting the table change; persisted records keep a state name, so
+removing a state requires migrating those records first.
+
 ```bash
 npm test -- core/lifecycle     # every allowed transition, and the rejected ones
 npm test -- core/workers       # the framework refuses the moves the table omits

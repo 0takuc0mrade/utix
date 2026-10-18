@@ -1,0 +1,32 @@
+{
+  "name": "oversized-data",
+  "description": "The data is larger than the 256 KiB limit; it is rejected before hashing.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "$repeat": {
+          "value": "A",
+          "count": 262145
+        }
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "18c7ce24eb1d7b1a260421c51e63397a8985252b49ec4e95ae991ae47ac7875f"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Malformed webhook message: data too large"
+    }
+  ]
+}

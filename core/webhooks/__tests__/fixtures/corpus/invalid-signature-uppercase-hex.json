@@ -1,0 +1,31 @@
+{
+  "name": "invalid-signature-uppercase-hex",
+  "description": "The digest is correct but re-cased; comparison is exact.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "252A1D540A27CD73E5291305879CD6A35D7AFAF7B8939AD66CA81756D4A83DDF"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Signature verification failed"
+    }
+  ]
+}

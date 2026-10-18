@@ -1,0 +1,31 @@
+{
+  "name": "replay-stale-timestamp",
+  "description": "A captured message is delivered after the clock-skew window.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1699999400,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1699999400,
+        "nonce": "nonce-0001",
+        "signature": "686e8526086303e49a74212dee747076e502f922d5183b2ef052f07e2f625298"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Timestamp outside acceptable skew window"
+    }
+  ]
+}

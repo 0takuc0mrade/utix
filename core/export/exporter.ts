@@ -90,6 +90,12 @@ export interface ExportRecordSource {
   fieldRules?: readonly FieldAuthorizationRule[];
   /** Collects the records synchronously. May include sensitive-looking fields. */
   collect: () => ExportRecord[];
+  /**
+   * Lazy alternative to `collect` for `streamExportRecords`. Records are pulled
+   * one at a time, so a large source is never materialised. Falls back to
+   * `collect` when absent.
+   */
+  stream?: () => Iterable<ExportRecord>;
 }
 
 export type ExportRecord = Record<string, unknown>;
@@ -516,6 +522,154 @@ export function exportRecords(
       return ok(envelope);
     }
   );
+}
+
+/** Default number of records handed to a consumer per chunk. */
+export const EXPORT_STREAM_DEFAULT_CHUNK_SIZE = 500;
+
+export interface ExportStreamOptions {
+  /** Maximum records buffered and yielded at once. Defaults to 500. */
+  chunkSize?: number;
+  /** Aborting stops the stream before the next record is pulled. */
+  signal?: AbortSignal;
+}
+
+export interface ExportStreamChunk {
+  index: number;
+  records: ExportRecord[];
+}
+
+export interface ExportStreamSummary {
+  status: "completed" | "cancelled";
+  chunkCount: number;
+  recordCount: number;
+  fieldsFiltered: number;
+}
+
+/** Yields authorised, redacted chunks and returns the summary when done. */
+export type ExportStream = Generator<ExportStreamChunk, ExportStreamSummary, undefined>;
+
+/**
+ * Streaming counterpart of `exportRecords`. The same authorization, schema,
+ * strict-field, quota, field-level filtering and redaction rules apply, but
+ * records are pulled lazily and handed out in bounded chunks, so memory stays
+ * at one chunk regardless of dataset size.
+ *
+ * Refusals are returned up front, before any record is read. Cancellation
+ * (an aborted `signal`, or the consumer abandoning the iterator) stops pulling
+ * from the source, drops the unfinished buffer and is audited with the count of
+ * records already delivered. A streamed export is not an artifact, so it has no
+ * envelope, expiry or idempotency key.
+ */
+export function streamExportRecords(
+  request: ExportRequest,
+  sources: ExportRecordSource[],
+  options: ExportStreamOptions = {}
+): Result<ExportStream, ExportErrorCode> {
+  const authorization = authorizeExport(request.actor, request.scope);
+  if (!authorization.ok) {
+    auditExport(request, "denied", { requestedScope: request.scope }, "export_denied");
+    return authorization;
+  }
+
+  if (request.schemaVersion !== EXPORT_CURRENT_SCHEMA_VERSION) {
+    auditExport(request, "denied", { requestedSchema: request.schemaVersion }, "schema_unsupported");
+    return err("schema_unsupported");
+  }
+
+  const combinedRules: FieldAuthorizationRule[] = [
+    ...DEFAULT_SENSITIVE_FIELD_RULES,
+    ...(request.fieldRules ?? []),
+    ...sources.flatMap((s) => s.fieldRules ?? [])
+  ];
+
+  if (request.fields && request.strictFields) {
+    const fieldAuth = evaluateFieldAuthorization(request.actor, request.fields, combinedRules);
+    if (!fieldAuth.authorized) {
+      auditExport(
+        request,
+        "denied",
+        { requestedFields: request.fields.join(","), deniedFields: fieldAuth.deniedFields.join(",") },
+        "field_authorization_denied"
+      );
+      return err("field_authorization_denied");
+    }
+  }
+
+  const charged = exportQuotaRef.current.consume({
+    operation: "export.generate",
+    principal: request.principal ?? (request.actor.kind === "maintainer" ? "maintainer" : `account:${request.scope}`),
+    correlationId: request.correlationId
+  });
+  if (!charged.ok) {
+    auditExport(request, "denied", { quota: "export.generate" }, charged.code);
+    return charged;
+  }
+
+  const allowed = sources.filter(
+    (source) =>
+      source.schemaVersion === request.schemaVersion &&
+      (request.scope === "maintainer" || source.scope === "own")
+  );
+  const chunkSize = Math.max(1, Math.floor(options.chunkSize ?? EXPORT_STREAM_DEFAULT_CHUNK_SIZE));
+  const { signal } = options;
+
+  function* run(): ExportStream {
+    let delivered = 0;
+    let chunkCount = 0;
+    let fieldsFiltered = 0;
+    let finished = false;
+    let cancelled = false;
+    let buffer: ExportRecord[] = [];
+    try {
+      for (const source of allowed) {
+        for (const raw of source.stream ? source.stream() : source.collect()) {
+          if (signal?.aborted) {
+            cancelled = true;
+            return { status: "cancelled", chunkCount, recordCount: delivered, fieldsFiltered };
+          }
+          const result = applyFieldLevelAuthorization(
+            { ...raw, recordType: source.recordType, scope: source.scope },
+            request.actor,
+            { requestedFields: request.fields, rules: combinedRules }
+          );
+          fieldsFiltered += result.filteredCount;
+          buffer.push(redact(result.record) as ExportRecord);
+          if (buffer.length >= chunkSize) {
+            const records = buffer;
+            buffer = [];
+            chunkCount += 1;
+            delivered += records.length;
+            yield { index: chunkCount - 1, records };
+          }
+        }
+      }
+      if (signal?.aborted) {
+        cancelled = true;
+        return { status: "cancelled", chunkCount, recordCount: delivered, fieldsFiltered };
+      }
+      if (buffer.length > 0) {
+        const records = buffer;
+        buffer = [];
+        chunkCount += 1;
+        delivered += records.length;
+        yield { index: chunkCount - 1, records };
+      }
+      finished = true;
+      return { status: "completed", chunkCount, recordCount: delivered, fieldsFiltered };
+    } finally {
+      // Also runs when the consumer calls `return()` on the iterator.
+      auditExport(request, "allowed", {
+        recordCount: delivered,
+        chunkCount,
+        schemaVersion: request.schemaVersion,
+        fieldsFiltered,
+        cancelled: cancelled || !finished
+      });
+    }
+  }
+
+  return ok(run());
 }
 
 /** True once an export's retention window has elapsed. */

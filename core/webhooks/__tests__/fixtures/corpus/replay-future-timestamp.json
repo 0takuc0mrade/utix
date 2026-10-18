@@ -1,0 +1,31 @@
+{
+  "name": "replay-future-timestamp",
+  "description": "A message is stamped further in the future than the skew allows.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000600,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000600,
+        "nonce": "nonce-0001",
+        "signature": "2ad402dc7254c69f27d1128a32a8c4a8993df14ec0cb8d808f21cbdde0eb4f8b"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Timestamp outside acceptable skew window"
+    }
+  ]
+}

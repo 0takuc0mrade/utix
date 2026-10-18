@@ -8,7 +8,41 @@ import {
   WebhookDeliveryAttempt,
 } from './types';
 
-class WebhookVerifier {
+/** Upper bound on a message's serialized `data`, before any hashing happens. */
+export const MAX_WEBHOOK_DATA_LENGTH = 256 * 1024;
+/** Upper bound on a nonce; replay records are keyed by it. */
+export const MAX_WEBHOOK_NONCE_LENGTH = 128;
+
+const SUPPORTED_ALGORITHMS = ['sha256', 'sha512'];
+
+/**
+ * Structural check for an untrusted message. Returns the reason it is
+ * malformed, or null. Runs before the clock, replay and HMAC checks so a bad
+ * payload is rejected deterministically instead of throwing or being hashed.
+ */
+function malformedReason(message: unknown): string | null {
+  if (typeof message !== 'object' || message === null) return 'message must be an object';
+  const { signature, data } = message as { signature?: unknown; data?: unknown };
+  if (typeof signature !== 'object' || signature === null) return 'missing signature';
+  const { algorithm, timestamp, nonce, signature: digest } = signature as Record<string, unknown>;
+  if (typeof algorithm !== 'string' || !SUPPORTED_ALGORITHMS.includes(algorithm)) {
+    return 'unsupported algorithm';
+  }
+  if (typeof timestamp !== 'number' || !Number.isFinite(timestamp)) return 'invalid timestamp';
+  if (typeof nonce !== 'string' || nonce.length === 0) return 'missing nonce';
+  if (nonce.length > MAX_WEBHOOK_NONCE_LENGTH) return 'nonce too long';
+  if (typeof digest !== 'string' || digest.length === 0) return 'missing signature digest';
+  if (data === undefined) return 'missing data';
+  try {
+    const serialized = JSON.stringify(data);
+    if (serialized !== undefined && serialized.length > MAX_WEBHOOK_DATA_LENGTH) return 'data too large';
+  } catch {
+    return 'data is not serializable';
+  }
+  return null;
+}
+
+export class WebhookVerifier {
   private defaultConfig: WebhookVerificationConfig = {
     replayWindowSeconds: 300,
     algorithmPreference: 'sha256',
@@ -59,6 +93,11 @@ class WebhookVerifier {
     message: WebhookMessage,
     secret: string,
   ): { valid: boolean; error?: string } {
+    const malformed = malformedReason(message);
+    if (malformed) {
+      return { valid: false, error: `Malformed webhook message: ${malformed}` };
+    }
+
     const { signature } = message;
 
     // Verify timestamp is within replay window

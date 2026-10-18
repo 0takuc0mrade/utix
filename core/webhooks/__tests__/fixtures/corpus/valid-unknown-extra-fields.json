@@ -1,0 +1,34 @@
+{
+  "name": "valid-unknown-extra-fields",
+  "description": "Unknown top-level fields from a newer sender are ignored when the signed parts verify.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "252a1d540a27cd73e5291305879cd6a35d7afaf7b8939ad66ca81756d4a83ddf"
+      },
+      "v2": {
+        "region": "eu",
+        "retries": 3
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": true
+    }
+  ]
+}

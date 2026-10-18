@@ -1,0 +1,15 @@
+{
+  "name": "not-an-object",
+  "description": "The payload is a bare string.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    "payload"
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Malformed webhook message: message must be an object"
+    }
+  ]
+}

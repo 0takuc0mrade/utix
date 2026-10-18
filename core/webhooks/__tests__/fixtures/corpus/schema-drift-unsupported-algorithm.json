@@ -1,0 +1,31 @@
+{
+  "name": "schema-drift-unsupported-algorithm",
+  "description": "A sender moved to an algorithm the receiver does not support.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "md5",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "00000000000000000000000000000000"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Malformed webhook message: unsupported algorithm"
+    }
+  ]
+}

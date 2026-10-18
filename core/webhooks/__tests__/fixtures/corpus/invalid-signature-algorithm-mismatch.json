@@ -1,0 +1,31 @@
+{
+  "name": "invalid-signature-algorithm-mismatch",
+  "description": "Signed with sha512 but labelled sha256.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "39ff686fe82f8b69ff8ef42d810235e1cbc8e0c4c1d6cc502822cb9f21795c50abb570cc2fa7529ef20957d5fe71535f82abd0bc55a6227b4f7dc07789f5464e"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": false,
+      "error": "Signature verification failed"
+    }
+  ]
+}

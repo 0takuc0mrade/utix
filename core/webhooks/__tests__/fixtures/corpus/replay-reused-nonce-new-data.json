@@ -1,0 +1,51 @@
+{
+  "name": "replay-reused-nonce-new-data",
+  "description": "An attacker reuses a seen nonce with different, validly signed data.",
+  "secret": "golden-corpus-secret",
+  "now": 1700000000,
+  "deliveries": [
+    {
+      "id": "evt-0001",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "a1b2c3",
+        "amount": "125.5000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "252a1d540a27cd73e5291305879cd6a35d7afaf7b8939ad66ca81756d4a83ddf"
+      }
+    },
+    {
+      "id": "evt-0002",
+      "timestamp": 1700000000,
+      "event": "payment.settled",
+      "data": {
+        "event": "payment.settled",
+        "txHash": "ffffff",
+        "amount": "1.0000000"
+      },
+      "signature": {
+        "algorithm": "sha256",
+        "secret": "",
+        "timestamp": 1700000000,
+        "nonce": "nonce-0001",
+        "signature": "255f54e199e46458f53612feb56f2c98399d232340ab72285233f51641604a4f"
+      }
+    }
+  ],
+  "expect": [
+    {
+      "valid": true
+    },
+    {
+      "valid": false,
+      "error": "Replay attack detected: nonce already used"
+    }
+  ]
+}

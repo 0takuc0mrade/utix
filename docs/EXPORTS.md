@@ -65,6 +65,35 @@ const source = {
 };
 ```
 
+## Streaming large exports
+
+`streamExportRecords(request, sources, { chunkSize, signal })` applies the same
+authorization, schema, strict-field, quota, field-level filtering and redaction
+rules as `exportRecords`, but pulls records lazily and yields bounded chunks, so
+memory stays at one chunk (default 500 records) regardless of dataset size.
+
+```ts
+const stream = streamExportRecords(request, sources, { chunkSize: 500, signal });
+if (!stream.ok) return stream; // refused before any record is read
+for (const chunk of stream.value) send(chunk.records);
+```
+
+A source may add `stream: () => Iterable<ExportRecord>` so the data is never
+materialised; without it the stream falls back to `collect`.
+
+- **Cancellation.** Abort the `signal`, or stop iterating (`break` / `return()`).
+  No further record is pulled, the unfinished buffer is dropped and the
+  source iterator is closed. The generator returns
+  `{ status: "cancelled", recordCount, ... }` counting only chunks already
+  handed out.
+- **Audit.** One `export.generated` event is written when the stream ends,
+  whether completed or cancelled (`cancelled` in the context). A stream that is
+  never iterated writes none, but its quota charge is spent.
+- **Not an artifact.** There is no envelope, expiry or idempotency key. A
+  consumer that needs a retry-safe artifact keeps using `exportRecords`.
+- **Mid-stream failure.** If a source throws, the generator throws after the
+  chunks already delivered; start a new stream to retry, nothing is persisted.
+
 ## Testing
 
 `npm run test` covers large exports (5 000 records, paged without loss), empty
@@ -73,3 +102,6 @@ and retention expiry — see `core/export/__tests__/exporter.test.ts`.
 
 Each export emits `export.generate` and `export.authorize` telemetry; see
 [docs/TELEMETRY.md](./TELEMETRY.md).
+
+Streaming, lazy pulling, cancellation and forbidden fields are covered in
+`core/export/__tests__/exportStream.test.ts`.
