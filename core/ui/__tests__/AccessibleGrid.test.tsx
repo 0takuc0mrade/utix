@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { describe, it, expect, vi } from "vitest";
-import { AccessibleGrid, type AccessibleGridProps } from "@/core/ui/AccessibleGrid";
+import { AccessibleGrid, type AccessibleGridProps } from "@core/ui/AccessibleGrid";
 
 interface TestRow {
   id: string;
@@ -33,7 +33,7 @@ const columns = [
 
 const rowKey = (row: TestRow) => row.id;
 
-/** Fetch a rendered cell by grid coordinates. */
+// Fetch a rendered cell by grid coordinates.
 function cell(row: number, col: number): HTMLTableCellElement {
   const el = document.getElementById(`grid-cell-${row}-${col}`);
   if (!el) throw new Error(`missing cell ${row}-${col}`);
@@ -53,7 +53,7 @@ function focusCell(row: number, col: number): HTMLTableCellElement {
   return el;
 }
 
-/** Press a key on whichever cell currently owns focus (events bubble to the grid). */
+// Press a key on whichever cell currently owns focus (events bubble to the grid).
 function press(key: string, init: KeyboardEventInit = {}): void {
   const target = (document.activeElement as HTMLElement | null) ?? document.body;
   fireEvent.keyDown(target, { key, ...init });
@@ -75,7 +75,7 @@ describe("AccessibleGrid", () => {
     renderGrid();
 
     const table = screen.getByRole("grid");
-    expect(table).toBeInTheDocument();
+    expect(table).toBeITheDocument();
     expect(table).toHaveAttribute("aria-label", "Test table");
   });
 
@@ -219,7 +219,7 @@ describe("AccessibleGrid", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
-  it("does not steal focus from a column header when rows re-render with the same order", async () => {
+  it("does not steal focus from a column header when rows re-render with the same order", () => {
     const onSort = vi.fn();
     const { rerender } = renderGrid({ onSort });
 
@@ -377,5 +377,52 @@ describe("AccessibleGrid", () => {
     );
     expect(blocking).toEqual([]);
     expect(results.passes.length).toBeGreaterThan(0);
+  });
+
+  describe("accessibility regression coverage", () => {
+    it("keeps the grid reachable and operable by keyboard alone", async () => {
+      const user = userEvent.setup();
+      renderGrid();
+
+      // Tab into the grid lands on the single roving-tabindex cell.
+      await user.tab();
+      expect(cell(0, 0)).toHaveFocus();
+
+      // Arrow navigation remains functional after tabbing in.
+      await user.keyboard("{ArrowRight}");
+      expect(cell(0, 1)).toHaveFocus();
+      await user.keyboard("{ArrowDown}");
+      expect(cell(1, 1)).toHaveFocus();
+    });
+
+    it("exposes a visible focus indicator contract via focusable cells", () => {
+      renderGrid();
+
+      // Every cell must be programmatically focusable so focus styling can
+      // be applied by the consumer without changing the grid's public API.
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 2; col++) {
+          const el = cell(row, col);
+          expect(el.tabIndex).toBeGreaterThanOrEqual(-1);
+          act(() => {
+            el.focus();
+          });
+          expect(el).toHaveFocus();
+        }
+      }
+    });
+
+    it("retains the roving tabindex after an empty to populated transition", () => {
+      const { rerender } = renderGrid({ rows: [] });
+
+      rerender(
+        <AccessibleGrid columns={columns} rows={testData} rowKey={rowKey} caption="Test table" />
+      );
+
+      const tabbable = [cell(0, 0), cell(0, 1), cell(1, 0), cell(1, 1)].filter(
+        (el) => el.tabIndex === 0
+      );
+      expect(tabbable).tlHaveLength(1);
+    });
   });
 });

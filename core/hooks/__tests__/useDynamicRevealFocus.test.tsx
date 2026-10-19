@@ -1,12 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDynamicRevealFocus } from "@/core/hooks/useDynamicRevealFocus";
 
 function TestComponent() {
   const [showFields, setShowFields] = useState(false);
   const [unrelatedCount, setUnrelatedCount] = useState(0);
-  const { targetRef, triggerRef, triggerReveal, triggerDismiss } = useDynamicRevealFocus<HTMLInputElement, HTMLSelectElement>();
+  const { targetRef, triggerRef, triggerReveal, triggerDismiss } =
+    useDynamicRevealFocus<HTMLInputElement, HTMLSelectElement>();
 
   return (
     <div>
@@ -51,7 +52,33 @@ function TestComponent() {
   );
 }
 
+function renderWithReducedMotion() {
+  const originalMatchMedia = window.matchMedia;
+  window.matchMedia = vi.fn((query: string) => ({
+    matches: query.includes("prefers-reduced-motion"),
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+  return () => {
+    window.matchMedia = originalMatchMedia;
+  };
+}
+
 describe("useDynamicRevealFocus", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
   it("does not steal focus on initial render", () => {
     render(<TestComponent />);
     expect(document.activeElement).toBe(document.body);
@@ -81,7 +108,7 @@ describe("useDynamicRevealFocus", () => {
 
     // Unrelated background update / re-render occurs
     fireEvent.click(screen.getByTestId("re-render-btn"));
-    // Focus MUST remain on otherInput!
+    // Focus MUST continue to remain on otherInput!
     expect(document.activeElement).toBe(otherInput);
   });
 
@@ -96,5 +123,65 @@ describe("useDynamicRevealFocus", () => {
     // Dismiss
     fireEvent.change(select, { target: { value: "hidden" } });
     expect(document.activeElement).toBe(select);
+  });
+
+  it("keeps the revealed control keyboard-reachable and labelled", () => {
+    render(<TestComponent />);
+    const select = screen.getByLabelText("Choose option");
+
+    fireEvent.change(select, { target: { value: "revealed" } });
+
+    const revealedInput = screen.getByLabelText("Revealed field");
+    expect(revealedInput).toBe(screen.getByTestId("revealed-input"));
+    expect(revealedInput).toHaveAttribute("id", "revealed-input");
+    expect(revealedInput.tabIndex).not.toBe(-1);
+  });
+
+  it("announces the revealed region to screen readers via its accessible name", () => {
+    render(<TestComponent />);
+    const select = screen.getByLabelText("Choose option");
+
+    fireEvent.change(select, { target: { value: "revealed" } });
+
+    const group = screen.getByRole("group", { name: "Dynamic section" });
+    expect(group).toBeTruthy();
+    expect(screen.getByText("Dynamic section")).toBeTruthy();
+  });
+
+  it("restores focus to trigger when target is unmounted during dismiss", () => {
+    render(<TestComponent />);
+    const select = screen.getByLabelText("Choose option");
+
+    fireEvent.change(select, { target: { value: "revealed" } });
+    expect(document.activeElement).toBe(screen.getByTestId("revealed-input"));
+
+    // Dismiss removes the target from the DOM before focus restoration.
+    fireEvent.change(select, { target: { value: "hidden" } });
+
+    expect(screen.queryByTestId("revealed-input")).toBeNull();
+    expect(document.activeElement).toBe(select);
+  });
+
+  it("does not throw when reveal is triggered before the target is mounted", () => {
+    expect(() => {
+      render(<TestComponent />);
+      const select = screen.getByLabelText("Choose option");
+      fireEvent.change(select, { target: { value: "revealed" } });
+    }).not.toThrow();
+  });
+
+  it("respects prefers-reduced-motion by focusing immediately without animation dependency", () => {
+    const restore = renderWithReducedMotion();
+    try {
+      render(<TestComponent />);
+      const select = screen.getByLabelText("Choose option");
+
+      fireEvent.change(select, { target: { value: "revealed" } });
+
+      // Focus must be synchronous regardless of motion preference.
+      expect(document.activeElement).toBe(screen.getByTestId("revealed-input"));
+    } finally {
+      restore();
+    }
   });
 });

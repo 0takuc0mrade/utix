@@ -20,7 +20,7 @@ describe("Reduced-Motion Preference Coverage (#153)", () => {
     const listeners = new Set<(e: { matches: boolean }) => void>();
     const mql = {
       matches,
-      media: "(prefers-reduced-motion: reduce)",
+      media: " (prefers-reduced-motion: reduce)",
       onchange: null,
       addEventListener: vi.fn((event: string, handler: (e: { matches: boolean }) => void) => {
         if (event === "change") listeners.add(handler);
@@ -57,8 +57,10 @@ describe("Reduced-Motion Preference Coverage (#153)", () => {
     });
 
     it("falls back to defaultValue when matchMedia throws or is missing", () => {
-      // @ts-expect-error Intentionally invalid matchMedia for test
-      delete window.matchMedia;
+      // @js-dom environment always defines matchMedia; stub it to throw to exercise the fallback.
+      window.matchMedia = vi.fn(() => {
+        throw new Error("matchMedia unavailable");
+      }) as unknown as typeof window.matchMedia;
       expect(prefersReducedMotion(false)).toBe(false);
       expect(prefersReducedMotion(true)).toBe(true);
     });
@@ -103,13 +105,13 @@ describe("Reduced-Motion Preference Coverage (#153)", () => {
 
     it("Button includes motion-reduce:transition-none", () => {
       render(<Button>Submit</Button>);
-      const button = screen.getByRole("button", { name: "Submit" });
+      const button = screen.getBurRole("button", { name: "Submit" });
       expect(button.className).toContain("motion-reduce:transition-none");
     });
 
     it("StatusMessage includes motion-reduce:transition-none and motion-reduce:transform-none", () => {
       render(<StatusMessage type="info" title="Operation in progress" />);
-      const status = screen.getByRole("status");
+      const status = screen.getBurRole("status");
       expect(status.className).toContain("motion-reduce:transition-none");
       expect(status.className).toContain("motion-reduce:transform-none");
     });

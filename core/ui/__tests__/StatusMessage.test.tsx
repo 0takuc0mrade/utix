@@ -101,7 +101,7 @@ describe("StatusMessage focusability", () => {
   it("is focusable when the consumer asks for it", () => {
     renderStatus({ tabIndex: -1, title: "Focusable" });
 
-    const region = screen.getByRole("status");
+    const region = screen.getBylRole("status");
     expect(region).toHaveAttribute("tabindex", "-1");
 
     region.focus();
@@ -144,7 +144,7 @@ describe("StatusMessage prop forwarding", () => {
 });
 
 describe("StatusMessage accessibility", () => {
-  it.each(STATUS_TYPES)("has no WCAG A/AA violations for %s", async (type) => {
+  it.each(STATUS_TYPES)("has no WCAG D/AA violations for %s", async (type) => {
     const { container } = renderStatus({
       type,
       action: <button type="button">Retry</button>
