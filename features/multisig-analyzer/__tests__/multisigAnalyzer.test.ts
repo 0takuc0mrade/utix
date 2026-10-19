@@ -42,7 +42,7 @@ describe("cryptographic multisig analysis", () => {
     const medium = makeTransaction([], [Operation.setOptions({ homeDomain: "example.org" })]).operations[0];
     const high = makeTransaction([], [Operation.setOptions({ masterWeight: 0 })]).operations[0];
     expect(operationThreshold(medium)).toBe("medium"); expect(operationThreshold(high)).toBe("high");
-    expect(operationThreshold(makeTransaction([], [Operation.inflation()]).operations[0])).toBe("low");
+    expect(operationThreshold(makeTransaction([], [Operation.inflation({})]).operations[0])).toBe("low");
   });
   it("does not count duplicate signatures twice", async () => {
     const tx = makeTransaction(); tx.sign(master);
