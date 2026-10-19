@@ -16,6 +16,11 @@ The approval flow ensures that privileged operations cannot be executed unilater
 | `admin_config_override` | Modifies core runtime administrative configuration | 2 maintainers |
 | `quota_override` | Temporarily raises or lowers tenant rate limits / quotas | 1 maintainer |
 | `dead_letter_purge` | Purges or requeues quarantined worker jobs | 1 maintainer |
+| `event_capacity_override` | Overrides event maximum inventory / venue capacity limit | 2 maintainers |
+| `event_cancellation` | Cancels event and triggers escrow refund / settlement procedures | 2 maintainers |
+| `fraud_lock_quarantine` | Quarantines ticket batches or accounts under fraud investigation | 1 maintainer |
+| `batch_ticket_burn` | Cryptographically burns batches of counterfeit / revoked tickets | 2 maintainers |
+| `organizer_fee_override` | Overrides custom protocol fee basis points for organizers | 2 maintainers |
 
 ## Architecture & Lifecycle
 
@@ -82,8 +87,49 @@ const receipts = approvalManager.listReceipts({ action: "emergency_killswitch" }
 const receipt = approvalManager.getReceipt(receiptId);
 ```
 
+### 6. Protected Administrative Action Verification
+For high-impact mutations (e.g. event capacity overrides, cancellations, fraud quarantines, ticket burns, fee adjustments), operations verify approval validity prior to mutation execution:
+
+```typescript
+import {
+  verifyProtectedActionApproval,
+  executeProtectedAction,
+  type ProtectedActionRequest
+} from "@/core/auth/maintainer-approval";
+
+const request: ProtectedActionRequest = {
+  action: "event_capacity_override",
+  target: "event-arena-101",
+  parameters: { maxTickets: 30000 },
+  approvalId: "intent-1700000000000-xyz",
+  executorPublicKey: "GBRPYHIL2CI3FNQ4BXLFMNDLFJUNPU2HY3ZMFSHONUCEOASW7QC7OX2H"
+};
+
+// 1. Explicit verification check (O(1) time and space complexity)
+const verification = verifyProtectedActionApproval(request);
+if (!verification.valid) {
+  console.error(`Rejected with error [${verification.error}]: ${verification.message}`);
+}
+
+// 2. Direct guarded execution
+const { result, receipt } = await executeProtectedAction(request, async (intent) => {
+  return await applyCapacityOverride(intent.target, intent.parameters.maxTickets);
+});
+```
+
+#### Guardrail Verification Error Codes:
+- `approval_not_found`: Approval intent ID does not exist.
+- `approval_not_ready`: Threshold of required maintainer signatures not yet reached.
+- `approval_expired`: Intent lifetime exceeded (`Date.now() > expiresAt`).
+- `already_executed`: Action was already executed or receipt already generated (replay prevention).
+- `action_mismatch`: Approval action does not match requested action.
+- `target_mismatch`: Approval target does not match requested target.
+- `parameter_mismatch`: Request parameters deviate from approved parameter values.
+- `unauthorized_actor`: Executor key is malformed or not permitted in the maintainer allowlist.
+
 ## Operational Edge Cases and Recovery
 
 1. **Maintainer Key Compromise**: If a maintainer's key is suspected compromised, other maintainers must reject any pending intents signed by that key and update the authorized maintainer allowlist.
 2. **Expired Intents**: Intents not signed before their expiration time automatically transition to `expired` and cannot be executed. A new intent with fresh nonce must be proposed.
 3. **Execution Failure Recovery**: If an action fails mid-execution, the receipt records `status: "failed"` with full stack trace and error message, allowing operators to diagnose root cause and plan recovery.
+

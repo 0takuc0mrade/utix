@@ -33,5 +33,10 @@
     "totalSize": 81920,
     "sizeKB": 80,
     "timestamp": "2026-09-25T00:00:00.000Z"
+  },
+  "_route_initial_load": {
+    "totalSize": 184320,
+    "sizeKB": 180,
+    "timestamp": "2026-09-25T00:00:00.000Z"
   }
 }

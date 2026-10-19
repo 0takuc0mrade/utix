@@ -22,3 +22,5 @@ export { Skeleton, SkeletonRows } from "@/core/ui/Skeleton";
 export { StatusMessage, type StatusMessageProps, type StatusType } from "@/core/ui/StatusMessage";
 export { ToolCard } from "@/core/ui/ToolCard";
 export { VirtualizedList, type VirtualizedListProps } from "@/core/ui/VirtualizedList";
+export { prefersReducedMotion, useReducedMotion } from "@/core/ui/accessibility";
+

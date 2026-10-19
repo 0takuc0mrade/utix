@@ -17,6 +17,31 @@ With an architecture built around independent, lazy-loaded feature slices, a gen
 
 This covers typical tool implementations including form validation, API calls, formatting, and result display.
 
+## Route-Level Initial-Load Budget (#159)
+
+**220 KB for the shared route shell** (`/tools/[slug]`)
+
+Per-feature slice budgets do not expose shared-chunk regression or the cost paid before a user reaches a tool. Utix measures route-level initial-load overhead from the build manifest:
+- Shared entrypoint chunks (`/_app`, webpack, root layout files)
+- Dynamic route container (`/tools/[slug]/page.tsx`)
+- Baseline tracking with stable tolerance ($\pm 5\%$) to prevent false positives from build hashes.
+
+## Documented Exception Path for SDK-Heavy Tools (#159)
+
+Tools that perform deep cryptographic decoding or compile Soroban contract ASTs require heavier dependencies (such as `@stellar/stellar-sdk` and `@stellar/stellar-xdr`). These tools have an explicit, documented exception path governed by [`scripts/bundle-budget-exceptions.json`](../scripts/bundle-budget-exceptions.json):
+
+| Feature | Exception Budget | Justification |
+| :--- | :--- | :--- |
+| `xdr-inspector` | 350 KB | Deep recursive XDR parser and Soroban contract type schemas |
+| `soroban-decoder` | 300 KB | Full Soroban ScVal decoding and contract auth types |
+| `transaction-decoder` | 250 KB | Transaction envelope and operation XDR schemas |
+| `soroban-spec-viewer` | 280 KB | Contract function specifications and environment interface bindings |
+
+### Requesting an Exception
+1. Ensure the heavy dependency cannot be split or loaded on-demand.
+2. Add an entry in `scripts/bundle-budget-exceptions.json` with `budgetKB`, `justification`, and `approved: true`.
+3. If the tool stays within its exception ceiling, `scripts/bundle-budget.mjs` marks it as `EXCEPTION_APPROVED`. If it exceeds the ceiling, it fails with `EXCEEDED`.
+
 ## Feature-Specific Budgets
 
 Some tools have adjusted budgets based on their requirements:

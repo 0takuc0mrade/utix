@@ -49,9 +49,14 @@ function subscribe(onStoreChange: () => void): () => void {
   };
 }
 
-function getSnapshot(): StellarNetwork {
+export function resetNetworkStorageListeners(): void {
+  listeners.clear();
+}
+
+function getSnapshotForStorage(storage?: Storage): StellarNetwork {
   try {
-    return resolveNetwork(window.localStorage.getItem(NETWORK_STORAGE_KEY), DEFAULT_NETWORK);
+    const s = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+    return resolveNetwork(s?.getItem(NETWORK_STORAGE_KEY), DEFAULT_NETWORK);
   } catch {
     // Private windows and blocked site data both throw here.
     return DEFAULT_NETWORK;
@@ -62,9 +67,10 @@ function getServerSnapshot(): StellarNetwork {
   return DEFAULT_NETWORK;
 }
 
-function writeNetwork(network: StellarNetwork): void {
+function writeNetworkForStorage(network: StellarNetwork, storage?: Storage): void {
   try {
-    window.localStorage.setItem(NETWORK_STORAGE_KEY, network);
+    const s = storage ?? (typeof window !== "undefined" ? window.localStorage : undefined);
+    s?.setItem(NETWORK_STORAGE_KEY, network);
   } catch {
     // The choice still applies for this session even if it cannot be persisted.
   }
@@ -73,12 +79,16 @@ function writeNetwork(network: StellarNetwork): void {
 
 export function NetworkProvider({
   children,
-  initialNetwork
+  initialNetwork,
+  storage: injectedStorage
 }: {
   children: React.ReactNode;
   /** Forces a network regardless of stored preference. Used by tests. */
   initialNetwork?: StellarNetwork;
+  /** Custom storage engine for test isolation and deterministic persistence (#155). */
+  storage?: Storage;
 }) {
+  const getSnapshot = useCallback(() => getSnapshotForStorage(injectedStorage), [injectedStorage]);
   const stored = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
   const [override, setOverride] = useState<StellarNetwork | undefined>(initialNetwork);
   const [epoch, setEpoch] = useState(0);
@@ -89,7 +99,7 @@ export function NetworkProvider({
     setEpoch((current) => current + 1);
     // Keep the in-memory choice authoritative even when storage is blocked.
     setOverride(next);
-    writeNetwork(next);
+    writeNetworkForStorage(next, injectedStorage);
     // The Horizon client is memoised per network; a pruning job is enqueued as
     // delayed maintenance work so rapid switches settle before the cache is torn down.
     getMaintenanceFramework().enqueue({
@@ -97,7 +107,7 @@ export function NetworkProvider({
       params: { network: next },
       delayMs: PRUNE_HORIZON_CLIENTS_DELAY_MS
     });
-  }, [network]);
+  }, [network, injectedStorage]);
 
   const value = useMemo<NetworkContextValue>(
     () => ({

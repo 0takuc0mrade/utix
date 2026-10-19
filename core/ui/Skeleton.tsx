@@ -7,7 +7,7 @@ export function Skeleton({ className }: { className?: string }) {
     <div
       data-contract-state="loading"
       aria-hidden
-      className={cn("animate-pulse rounded-md bg-[#e3ebf5]", className)}
+      className={cn("animate-pulse motion-reduce:animate-none rounded-md bg-[#e3ebf5]", className)}
     />
   );
 }

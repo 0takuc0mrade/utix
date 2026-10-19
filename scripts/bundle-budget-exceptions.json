@@ -1,0 +1,25 @@
+{
+  "$comment": "Documented exception path for SDK-heavy tools (#159). Tools requiring deep XDR parsing or Soroban contract bindings have an explicit approved ceiling.",
+  "exceptions": {
+    "xdr-inspector": {
+      "budgetKB": 350,
+      "justification": "Deep recursive XDR parser and Soroban contract type schemas",
+      "approved": true
+    },
+    "soroban-decoder": {
+      "budgetKB": 300,
+      "justification": "Full Soroban ScVal decoding and contract auth types",
+      "approved": true
+    },
+    "transaction-decoder": {
+      "budgetKB": 250,
+      "justification": "Transaction envelope and operation XDR schemas",
+      "approved": true
+    },
+    "soroban-spec-viewer": {
+      "budgetKB": 280,
+      "justification": "Contract function specifications and environment interface bindings",
+      "approved": true
+    }
+  }
+}

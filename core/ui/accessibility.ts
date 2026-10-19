@@ -8,6 +8,8 @@
  * - Screen reader-friendly loading/error/success states
  */
 
+import { useEffect, useState } from "react";
+
 export type AriaLive = 'polite' | 'assertive' | 'off';
 
 export type AsyncStatus = 'idle' | 'loading' | 'success' | 'error';
@@ -168,3 +170,53 @@ export function getFocusableElements(container: HTMLElement): HTMLElement[] {
     'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(isFocusable);
 }
+
+/**
+ * Query whether the user has requested reduced motion (#153).
+ * Returns defaultValue (false by default) if window or matchMedia is unavailable.
+ */
+export function prefersReducedMotion(defaultValue = false): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return defaultValue;
+  }
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return defaultValue;
+  }
+}
+
+/**
+ * React hook to observe user reduced-motion preference changes (#153).
+ * Preserves state visibility without relying on animation completion.
+ */
+export function useReducedMotion(defaultValue = false): boolean {
+  const [reducedMotion, setReducedMotion] = useState<boolean>(() =>
+    prefersReducedMotion(defaultValue)
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReducedMotion(mediaQueryList.matches);
+
+    const listener = (event: MediaQueryListEvent | MediaQueryList) => {
+      setReducedMotion(event.matches);
+    };
+
+    if (typeof mediaQueryList.addEventListener === "function") {
+      mediaQueryList.addEventListener("change", listener as (e: MediaQueryListEvent) => void);
+      return () =>
+        mediaQueryList.removeEventListener("change", listener as (e: MediaQueryListEvent) => void);
+    } else if (typeof (mediaQueryList as any).addListener === "function") {
+      (mediaQueryList as any).addListener(listener);
+      return () => (mediaQueryList as any).removeListener(listener);
+    }
+  }, []);
+
+  return reducedMotion;
+}
+

@@ -1,4 +1,4 @@
-export { renderFeature, screen, waitFor, within, userEvent } from "@/core/testing/render";
+export { renderFeature, createIsolatedStorage, screen, waitFor, within, userEvent } from "@/core/testing/render";
 export {
   renderFeatureSlice,
   FEATURE_CONTRACT_STATES,

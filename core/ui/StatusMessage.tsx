@@ -50,7 +50,7 @@ export const StatusMessage = forwardRef<HTMLDivElement, StatusMessageProps>(
         role={isError ? "alert" : "status"}
         aria-live={isError ? "assertive" : "polite"}
         className={cn(
-          "flex gap-3 rounded-lg border p-4 shadow-[4px_4px_0_rgba(255,139,122,0.12)] focus:outline-none focus:ring-2 focus:ring-[#47a8c7]",
+          "flex gap-3 rounded-lg border p-4 shadow-[4px_4px_0_rgba(255,139,122,0.12)] focus:outline-none focus:ring-2 focus:ring-[#47a8c7] motion-reduce:transition-none motion-reduce:transform-none",
           styles[type],
           className
         )}

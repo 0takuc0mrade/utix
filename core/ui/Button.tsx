@@ -27,7 +27,7 @@ export function Button({ className, variant = "primary", size = "md", ...props }
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md border border-black/10 font-extrabold transition",
+        "inline-flex items-center justify-center gap-2 rounded-md border border-black/10 font-extrabold transition motion-reduce:transition-none",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#47a8c7] focus-visible:ring-offset-2",
         "disabled:cursor-not-allowed disabled:opacity-50",
         sizes[size],

@@ -23,7 +23,12 @@ export type HighImpactAction =
   | "protocol_rollback"
   | "quota_override"
   | "dead_letter_purge"
-  | "admin_config_override";
+  | "admin_config_override"
+  | "event_capacity_override"
+  | "event_cancellation"
+  | "fraud_lock_quarantine"
+  | "batch_ticket_burn"
+  | "organizer_fee_override";
 
 export type IntentStatus = "pending" | "approved" | "executing" | "executed" | "rejected" | "expired" | "failed";
 
@@ -84,14 +89,50 @@ export interface ApprovalFlowOptions {
   defaultExpiryMs?: number;
 }
 
+export interface ProtectedActionRequest {
+  action: HighImpactAction;
+  target: string;
+  parameters?: Record<string, unknown>;
+  approvalId: string;
+  executorPublicKey: string;
+}
+
+export type ProtectedActionErrorCode =
+  | "approval_not_found"
+  | "approval_not_ready"
+  | "approval_expired"
+  | "already_executed"
+  | "action_mismatch"
+  | "target_mismatch"
+  | "parameter_mismatch"
+  | "unauthorized_actor";
+
+export type ProtectedActionVerificationResult =
+  | { valid: true; intent: IntentRequest }
+  | {
+      valid: false;
+      error: ProtectedActionErrorCode;
+      message: string;
+    };
+
+export interface ProtectedActionExecutionOptions {
+  authorizedMaintainers?: string[];
+  requireSignerAsExecutor?: boolean;
+}
+
 const DEFAULT_EXPIRY_MS = 30 * 60 * 1000; // 30 minutes
-const ACTION_THRESHOLDS: Record<HighImpactAction, number> = {
+export const ACTION_THRESHOLDS: Record<HighImpactAction, number> = {
   emergency_killswitch: 2,
   protocol_rollback: 2,
   reconciliation_repair: 2,
   admin_config_override: 2,
   quota_override: 1,
-  dead_letter_purge: 1
+  dead_letter_purge: 1,
+  event_capacity_override: 2,
+  event_cancellation: 2,
+  fraud_lock_quarantine: 1,
+  batch_ticket_burn: 2,
+  organizer_fee_override: 2
 };
 
 /**
@@ -404,6 +445,143 @@ export class MaintainerApprovalManager {
   }
 
   /**
+   * Returns the current timestamp according to the manager's clock configuration.
+   */
+  currentTime(): number {
+    return this.now();
+  }
+
+  /**
+   * Determines whether an intent is expired.
+   */
+  isExpired(intent: IntentRequest): boolean {
+    return intent.status === "expired" || this.now() > intent.expiresAt;
+  }
+
+  /**
+   * Verifies that a protected high-impact administrative action has a valid,
+   * unexpired, signed approval matching the target, action, parameters, and authorized actor.
+   * Time complexity: O(1).
+   * Space complexity: O(1).
+   */
+  verifyProtectedAction(
+    request: ProtectedActionRequest,
+    options?: ProtectedActionExecutionOptions
+  ): ProtectedActionVerificationResult {
+    if (!StrKey.isValidEd25519PublicKey(request.executorPublicKey)) {
+      return {
+        valid: false,
+        error: "unauthorized_actor",
+        message: `Invalid Ed25519 public key format for executor: ${request.executorPublicKey}`
+      };
+    }
+
+    if (options?.authorizedMaintainers && !options.authorizedMaintainers.includes(request.executorPublicKey)) {
+      return {
+        valid: false,
+        error: "unauthorized_actor",
+        message: `Executor ${request.executorPublicKey} is not in authorized maintainer allowlist`
+      };
+    }
+
+    const intent = this.intents.get(request.approvalId);
+    if (!intent) {
+      return {
+        valid: false,
+        error: "approval_not_found",
+        message: `Approval intent with ID '${request.approvalId}' was not found`
+      };
+    }
+
+    if (options?.requireSignerAsExecutor) {
+      const isSigner = intent.signatures.some(s => s.signerPublicKey === request.executorPublicKey) || intent.requestedBy === request.executorPublicKey;
+      if (!isSigner) {
+        return {
+          valid: false,
+          error: "unauthorized_actor",
+          message: `Executor ${request.executorPublicKey} is not a valid signer or requester for intent ${request.approvalId}`
+        };
+      }
+    }
+
+    if (intent.status === "executed" || intent.status === "executing" || this.receiptsByIntent.has(request.approvalId)) {
+      return {
+        valid: false,
+        error: "already_executed",
+        message: `Approval intent '${request.approvalId}' has already been executed (replay prevented)`
+      };
+    }
+
+    if (this.isExpired(intent)) {
+      intent.status = "expired";
+      return {
+        valid: false,
+        error: "approval_expired",
+        message: `Approval intent '${request.approvalId}' has expired`
+      };
+    }
+
+    if (intent.status !== "approved") {
+      return {
+        valid: false,
+        error: "approval_not_ready",
+        message: `Approval intent '${request.approvalId}' is not approved (current status: ${intent.status}, required: ${intent.requiredSignatures}, signed: ${intent.signatures.length})`
+      };
+    }
+
+    if (intent.action !== request.action) {
+      return {
+        valid: false,
+        error: "action_mismatch",
+        message: `Action mismatch: approval authorizes '${intent.action}', but request attempted '${request.action}'`
+      };
+    }
+
+    if (intent.target !== request.target) {
+      return {
+        valid: false,
+        error: "target_mismatch",
+        message: `Target mismatch: approval authorizes target '${intent.target}', but request attempted '${request.target}'`
+      };
+    }
+
+    if (request.parameters) {
+      for (const [key, val] of Object.entries(request.parameters)) {
+        if (JSON.stringify(intent.parameters[key]) !== JSON.stringify(val)) {
+          return {
+            valid: false,
+            error: "parameter_mismatch",
+            message: `Parameter '${key}' mismatch between approval intent and requested action`
+          };
+        }
+      }
+    }
+
+    return {
+      valid: true,
+      intent
+    };
+  }
+
+  /**
+   * Executes a protected administrative action after strictly validating cryptographic approval.
+   * Time complexity: O(1) + actionHandler execution time.
+   * Space complexity: O(1).
+   */
+  async executeProtectedAction<T>(
+    request: ProtectedActionRequest,
+    actionHandler: (intent: IntentRequest) => Promise<T> | T,
+    options?: ProtectedActionExecutionOptions
+  ): Promise<{ result: T; receipt: ApprovalReceipt }> {
+    const verification = this.verifyProtectedAction(request, options);
+    if (!verification.valid) {
+      throw new Error(`Protected action rejected [${verification.error}]: ${verification.message}`);
+    }
+
+    return this.executeIntent(request.approvalId, request.executorPublicKey, actionHandler);
+  }
+
+  /**
    * Clears in-memory data (useful for test isolation).
    */
   reset(): void {
@@ -414,3 +592,27 @@ export class MaintainerApprovalManager {
 }
 
 export const maintainerApprovalManager = new MaintainerApprovalManager();
+
+/**
+ * Top-level convenience wrapper for verifying protected action approvals against the default or provided manager.
+ */
+export function verifyProtectedActionApproval(
+  request: ProtectedActionRequest,
+  manager: MaintainerApprovalManager = maintainerApprovalManager,
+  options?: ProtectedActionExecutionOptions
+): ProtectedActionVerificationResult {
+  return manager.verifyProtectedAction(request, options);
+}
+
+/**
+ * Top-level convenience wrapper for executing protected actions after approval verification.
+ */
+export async function executeProtectedAction<T>(
+  request: ProtectedActionRequest,
+  actionHandler: (intent: IntentRequest) => Promise<T> | T,
+  manager: MaintainerApprovalManager = maintainerApprovalManager,
+  options?: ProtectedActionExecutionOptions
+): Promise<{ result: T; receipt: ApprovalReceipt }> {
+  return manager.executeProtectedAction(request, actionHandler, options);
+}
+

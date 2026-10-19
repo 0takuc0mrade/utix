@@ -13,7 +13,8 @@ export default defineConfig({
     setupFiles: ["./core/testing/setup.ts"],
     include: [
       "features/**/__tests__/**/*.test.{ts,tsx}",
-      "core/**/__tests__/**/*.test.{ts,tsx}"
+      "core/**/__tests__/**/*.test.{ts,tsx}",
+      "__tests__/**/*.test.{ts,tsx}"
     ],
     exclude: ["**/node_modules/**", "**/e2e/**", "**/.next/**"],
     coverage: {
