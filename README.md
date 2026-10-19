@@ -1,3 +1,4 @@
+
 # Utix
 
 An open-source toolkit of small, focused utilities for Stellar developers —
@@ -29,6 +30,7 @@ Infrastructure docs: [Telemetry](./docs/TELEMETRY.md) ·
 [Audit trail](./docs/AUDIT.md) ·
 [Tamper-evident ledger](./docs/LEDGER.md) ·
 [Fee calculation](./docs/FEES.md) ·
+[Anomaly detection](./docs/ANOMALY_DETECTION.md) ·
 [Authorization expiry](./docs/AUTHORIZATIONS.md) ·
 [Public status feed](./docs/PUBLIC_STATUS.md) ·
 [Seed data](./docs/SEED_DATA.md) ·
@@ -45,6 +47,9 @@ Infrastructure docs: [Telemetry](./docs/TELEMETRY.md) ·
 | Transaction Lookup   | Ledger, fee, memo, result and operations for a transaction hash      |
 | Freighter Connect    | Detects the wallet and warns about a network mismatch                |
 | Testnet Faucet       | Funds a testnet account through Friendbot                            |
+| Anomaly Report       | Read-only report of unusual volume, timing and actor behavior        |
+|                      | Grouped by severity and affected resource, with triage guidance      |
+|                      | Signals: volume spikes, timing anomalies, actor repetition, failures |
 
 ## Tech stack
 
@@ -83,12 +88,16 @@ npm run verify:issues        # check 40+ independent issues and the advanced wav
 npm run verify:telemetry     # verify >= 5 operations are instrumented
 npm run verify:reconciliation # every invariant is checked, the dry run is read-only, repair is dry-run-first
 npm run verify:contract      # run the API contract drift tests
+npm run verify:anomaly       # anomaly report identifies fixture spikes, repeats and suspicious actors
+npm run verify:anomaly       # validates severity grouping, resource grouping and triage output
 npm run verify:replay        # versioned event replay suite
 npm run verify:replay-concurrency # deterministic concurrent-write and retry replay tests
 npm run test:workers         # run the background worker suite
 npm test -- core/lifecycle   # allowed and rejected record state transitions
 npm test -- core/idempotency # retry, replay, expiry and key collisions
 npm test -- core/reconciliation # drift, root-cause hints, repair plan/apply/rollback
+npm test -- features/anomaly-report # baseline, spike, repeated failure and suspicious actor scenarios
+npm test -- features/anomaly-report # also covers false-positive mitigation and severity grouping
 npm run issues               # preview the next five GrantFox issue payloads
 npm run test                 # unit, hook, component and accessibility tests
 npm run test:e2e              # full Playwright suite
@@ -141,7 +150,16 @@ See documentation for operational workflows:
 - [DISASTER_RECOVERY.md](./docs/DISASTER_RECOVERY.md) - Data validation after restore
 - [OPERATIONAL_HEALTH.md](./docs/OPERATIONAL_HEALTH.md) - Health monitoring dashboard
 - [BUNDLE_BUDGET.md](./docs/BUNDLE_BUDGET.md) - Per-feature bundle size enforcement
+- [ANOMALY_DETECTION.md](./docs/ANOMALY_DETECTION.md) - Anomaly signals, severity triage and false-positive mitigation
 
 ## Security
 
 See [SECURITY.md](./SECURITY.md). Utix is read-only by design.
+
+The anomaly report is read-only and groups findings by severity and affected
+resource. See [docs/ANOMALY_DETECTION.md](./docs/ANOMALY_DETECTION.md) for the
+signal definitions and maintainer triage guidance.
+
+False-positive mitigation is documented in the same guide: baseline windows,
+minimum sample sizes, and per-signal suppression rules keep normal traffic
+from being flagged while still surfacing genuine spikes, repeats and failures.
