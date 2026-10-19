@@ -11,6 +11,7 @@
  * - Elevated Confirmation: dangerous mutations require explicit tokens if configured.
  */
 
+import { recordAudit, type AuditAction } from '@/core/audit/audit';
 import { err, ok, type Result } from '@/core/result/result';
 import {
   ACTION_SCOPE_MAP,
@@ -18,6 +19,7 @@ import {
   DANGEROUS_MUTATIONS,
   ImpersonationAction,
   ImpersonationAuditEvent,
+  ImpersonationAuditEventType,
   ImpersonationBannerState,
   ImpersonationErrorCode,
   ImpersonationScope,
@@ -318,9 +320,34 @@ export function getImpersonationBannerState(
   };
 }
 
-/** Records an audit event to the append-only trail */
+const CANONICAL_AUDIT_ACTIONS: Record<ImpersonationAuditEventType, AuditAction> = {
+  session_started: 'impersonation.session_started',
+  session_ended: 'impersonation.session_ended',
+  session_expired: 'impersonation.session_expired',
+  action_performed: 'impersonation.action',
+  mutation_blocked: 'impersonation.mutation_blocked'
+};
+
+/** Records an audit event to the local trail and the canonical audit trail */
 function recordAuditEvent(event: ImpersonationAuditEvent): void {
   impersonationAuditTrail.push(Object.freeze(event));
+  recordAudit({
+    action: CANONICAL_AUDIT_ACTIONS[event.eventType],
+    actor: { kind: 'maintainer', id: event.maintainerId },
+    scope: 'maintainer',
+    target: { kind: 'user', id: event.targetUserId || 'unknown' },
+    reason: 'support_access',
+    outcome: event.outcome,
+    after: {
+      sessionId: event.sessionId,
+      eventType: event.eventType,
+      action: event.action ?? null,
+      reason: event.reason ?? null
+    },
+    at: event.timestamp,
+    correlationId: event.sessionId,
+    ...(event.outcome === 'denied' ? { errorCode: 'impersonation_denied' } : {})
+  });
 }
 
 /** Returns the recorded impersonation audit trail (read-only copy) */

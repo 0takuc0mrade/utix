@@ -55,6 +55,14 @@ cannot disagree about coverage:
 | `authorization.renewed`     | `core/authorizations/store.ts` (`renew`)      |
 | `authorization.revoked`     | `core/authorizations/store.ts` (`revoke`)     |
 | `authorization.cleaned_up`  | `core/authorizations/store.ts` (`cleanup`)    |
+| `impersonation.session_started` | `core/impersonation/impersonation.ts` (`createImpersonationSession`) |
+| `impersonation.session_ended` | `core/impersonation/impersonation.ts` (`endImpersonationSession`) |
+| `impersonation.session_expired` | `core/impersonation/impersonation.ts` (`canExecuteAction`) |
+| `impersonation.action` | `core/impersonation/impersonation.ts` (`canExecuteAction`) |
+| `impersonation.mutation_blocked` | `core/impersonation/impersonation.ts` (`canExecuteAction`) |
+
+See [Support access](./SUPPORT_ACCESS.md) for the session model, scopes,
+failure modes and rollback steps.
 
 ### Which lifecycle moves are audited
 

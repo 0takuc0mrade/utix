@@ -70,6 +70,16 @@ export const SENSITIVE_ACTIONS = [
   "projection.activated",
   /** Administrative configuration was changed (or a change was refused). */
   "admin.config_changed",
+  /** A maintainer opened a scoped support-access session. */
+  "impersonation.session_started",
+  /** A maintainer closed a support-access session. */
+  "impersonation.session_ended",
+  /** A support-access session expired before the maintainer closed it. */
+  "impersonation.session_expired",
+  /** A permitted action ran inside a support-access session (or was refused). */
+  "impersonation.action",
+  /** A dangerous mutation was blocked inside a read-only support session. */
+  "impersonation.mutation_blocked",
   /** A delegated permission was granted (or a grant was refused). */
   "authorization.granted",
   /** A delegated permission was renewed (or a renewal was refused). */
