@@ -87,7 +87,19 @@ export const SENSITIVE_ACTIONS = [
   /** A delegated permission was revoked (or a revocation was refused). */
   "authorization.revoked",
   /** A stale delegated permission was removed by cleanup (or cleanup was refused). */
-  "authorization.cleaned_up"
+  "authorization.cleaned_up",
+  /** A recipient's notification preferences were changed (or the change was refused). */
+  "notification_preferences.updated",
+  /** A recipient's notification preferences were reset to defaults. */
+  "notification_preferences.reset",
+  /** An optional notification was suppressed by the recipient's preferences. */
+  "notification.suppressed_by_preference",
+  /** A mandatory alert was delivered despite the recipient's preferences. */
+  "notification.mandatory_override",
+  /** A freeze window was bypassed for an emergency action. */
+  "freeze.bypassed",
+  /** An emergency bypass of a freeze window was refused. */
+  "freeze.bypass_denied"
 ] as const;
 
 export type AuditAction = (typeof SENSITIVE_ACTIONS)[number];

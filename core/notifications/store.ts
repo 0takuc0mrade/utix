@@ -260,6 +260,22 @@ export class NotificationStore {
   }
 
   /**
+   * Only the recipient may change their own preferences. Other edits are audited as
+   * denied and refused, so a workspace or another account cannot silence a recipient.
+   */
+  private assertPreferenceEditor(recipient: NotificationRecipient, actor: NotificationRecipient): void {
+    if (actor === recipient) return;
+    recordAudit({
+      action: "notification_preferences.updated",
+      actor: { kind: "user", id: actor },
+      target: { kind: "notification", id: recipient },
+      outcome: "denied",
+      reason: "unauthorized_preference_edit"
+    });
+    throw new Error(`Preferences for ${recipient} cannot be edited by ${actor}`);
+  }
+
+  /**
    * Updates durable preferences for a recipient and records an audit log.
    *
    * Pass `expectedVersion` (the `version` the patch was computed from) to make
@@ -269,11 +285,12 @@ export class NotificationStore {
   updatePreferences(
     recipient: NotificationRecipient,
     patch: Partial<Omit<NotificationPreferences, "recipient" | "mandatoryAlertsAlwaysDeliver">>,
-    { expectedVersion }: { expectedVersion?: number } = {}
+    actor: NotificationRecipient = recipient
   ): NotificationPreferences {
     if (!isNotificationRecipient(recipient)) {
       throw new Error(`Invalid notification recipient: ${String(recipient)}`);
     }
+    this.assertPreferenceEditor(recipient, actor);
     const current = this.getPreferences(recipient);
     if (expectedVersion !== undefined && expectedVersion !== current.version) {
       throw new StalePreferencesVersionError(recipient, expectedVersion, current.version);
@@ -316,10 +333,14 @@ export class NotificationStore {
   /**
    * Resets preferences to factory defaults.
    */
-  resetPreferences(recipient: NotificationRecipient): NotificationPreferences {
+  resetPreferences(
+    recipient: NotificationRecipient,
+    actor: NotificationRecipient = recipient
+  ): NotificationPreferences {
     if (!isNotificationRecipient(recipient)) {
       throw new Error(`Invalid notification recipient: ${String(recipient)}`);
     }
+    this.assertPreferenceEditor(recipient, actor);
     const defaults = createDefaultPreferences(recipient);
     this.storage.removeItem(this.prefKey(recipient));
 
