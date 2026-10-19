@@ -34,6 +34,7 @@ Every record carries exactly these fields:
 | Path             | Operation names                              |
 |------------------|----------------------------------------------|
 | request          | `horizon.request`                            |
+| Soroban RPC      | `soroban.rpc`                                 |
 | wallet           | `wallet.detect`                              |
 | worker           | `worker.run`, `worker.retry`, `worker.exhausted` |
 | data processing  | `export.generate`, `export.authorize`, `contract.validate` |
@@ -41,6 +42,21 @@ Every record carries exactly these fields:
 `npm run verify:telemetry` fails if fewer than five distinct operations are
 instrumented or if an instrumentation site is missing `actorType` /
 `correlationId`.
+
+## Correlating Soroban RPC and worker attempts
+
+`sorobanRpc` uses its `correlationId` option as the JSON-RPC `id`; when omitted,
+it generates a UUID. This lets the RPC provider's request logs and Utix
+telemetry share an identifier without adding a custom HTTP header (which would
+trigger a CORS preflight in browser clients). A worker handler should pass its
+`WorkerContext.correlationId` to each RPC call it makes. The queue retains that
+identifier across retries, so attempts can be grouped even when a transport
+failure requires retry or the job reaches the dead-letter store.
+
+The correlation ID is for tracing only, not authorization or idempotency. Do not
+use it to authorize a request or to deduplicate side effects. A failed or
+malformed RPC response still emits a failure telemetry record with the same ID;
+the RPC response envelope and existing error codes remain unchanged.
 
 ## Sensitive values
 

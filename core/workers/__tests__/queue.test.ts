@@ -60,6 +60,27 @@ describe("worker framework", () => {
     expect(job.status).toBe("dead_lettered");
   });
 
+  it("preserves the job correlation id in worker context across retries", () => {
+    const correlationIds: string[] = [];
+    framework.register("correlated.process", (_params, context) => {
+      correlationIds.push(context.correlationId);
+      if (context.attempt === 1) throw new Error("retry this attempt");
+    });
+
+    const correlationId = "correlation-retry-123";
+    const job = framework.enqueue({
+      operation: "correlated.process",
+      correlationId,
+      maxAttempts: 2
+    });
+
+    framework.drainDueJobs();
+    framework.drainDueJobs(Date.parse(job.nextAttemptAt!) + 1);
+
+    expect(correlationIds).toEqual([correlationId, correlationId]);
+    expect(job.status).toBe("succeeded");
+  });
+
   it("retries do not run before their backoff time and do not exceed the budget", () => {
     framework.register("slow.process", () => {
       throw new Error("nope");
