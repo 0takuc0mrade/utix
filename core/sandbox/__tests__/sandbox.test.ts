@@ -6,6 +6,31 @@ import {
   SCENARIO_INSUFFICIENT_FUNDS_ACCOUNT
 } from '../fixtures';
 
+const SENSITIVE_MARKERS = [
+  '<script>',
+  '</script>',
+  'javascript:',
+  'onerror=',
+  'onload=',
+  'data:text/html',
+  'file://',
+  '../',
+  '..\\',
+  '\u0000',
+  '{{',
+  '${'
+];
+
+function assertNoSensitiveLeak(value: unknown, forbiddenKeys: string[] = []): void {
+  const serialized = JSON.stringify(value);
+  for (const marker of SENSITIVE_MARKERS) {
+    expect(serialized).not.toContain(marker);
+  }
+  for (const key of forbiddenKeys) {
+    expect(serialized).not.toContain(`"${key}":`);
+  }
+}
+
 describe('Integration Sandbox Mode (#85)', () => {
   let sandbox: SandboxEnvironment;
 
@@ -89,7 +114,7 @@ describe('Integration Sandbox Mode (#85)', () => {
       expect(sandbox.wallet.isConnected()).toBe(true);
 
       const signRes = await sandbox.wallet.signTransaction('UNEVEN_XDR');
-      expect(signRes.signedXdr).toContain('SIGNED_G_TEST_KEY_123_UNEVEN_XDR');
+      expect(signRes.signedXtr).toContain('SIGNED_G_TEST_KEY_123_UNEVEN_XDR');
 
       sandbox.wallet.disconnect();
       expect(sandbox.wallet.isConnected()).toBe(false);
@@ -155,12 +180,91 @@ describe('Integration Sandbox Mode (#85)', () => {
     });
   });
 
+  describe('Sensitive-Content Boundaries', () => {
+    const XSS_PAYLOAD = '<script>alert(1)</script>';
+    const PATH_TRAVERSAL = '../../etc/passwd';
+    const TEMPLATE_INJECTION = '${process.env.SECRET}';
+
+    it('does not execute or leak untrusted content in rendered notifications', async () => {
+      await sandbox.executePrimaryWorkflow();
+      const outbox = sandbox.notifications.getOutbox();
+      expect(outbox.length).toBeGreaterThan(0);
+
+      for (const message of outbox) {
+        const rendered = `${message.subject}\n${message.body}`;
+        expect(rendered).not.toContain('<script>');
+        expect(rendered).not.toContain('javascript:');
+        expect(rendered).not.toContain('onerror=');
+        assertNoSensitiveLeak(message, ['privateKey', 'secretKey', 'seed']);
+      }
+    });
+
+    it('rejects path traversal and executable content in download identifiers', async () => {
+      const buyRes = await sandbox.buyTicket({
+        ticketId: 'tkt_download_01',
+        eventId: 'ev_happy_01',
+        buyerPublicKey: 'G_BOB_ATTENDEE_HAPPY'
+      });
+      expect(buyRes.ok).toBe(true);
+
+      const maliciousIds = [PATH_TRAVERSAL, '..\\windows\\system32', 'file:///etc/passwd', 'data:text/html,<script>alert(1)</script>'];
+      for (const ticketId of maliciousIds) {
+        const res = await sandbox.redeemTicket({
+          ticketId,
+          claimerPublicKey: 'G_BOB_ATTENDEE_HAPPY'
+        });
+        expect(res.ok).toBe(false);
+      }
+    });
+
+    it('sanitizes webhook payloads and never leaks private fields', async () => {
+      await sandbox.executePrimaryWorkflow();
+      const webhooks = sandbox.webhooks.getDispatchedEvents();
+      expect(webhooks.length).toBeGreaterThan(0);
+
+      for (const event of webhooks) {
+        assertNoSensitiveLeak(event.payload, ['privateKey', 'secretKey', 'seed', 'mnemonic']);
+        expect(JSON.stringify(event.payload)).not.toContain('<script>');
+      }
+    });
+
+    it('enforces allow-lists on export fields and blocks injection payloads', () => {
+      const snapshot = sandbox.takeSnapshot();
+      const serialized = JSON.stringify(snapshot);
+
+      expect(serialized).not.toContain(XSS_PAYLOAD);
+      expect(serialized).not.toContain(TEMPLATE_INJECTION);
+      expect(serialized).not.toContain('privateKey');
+      expect(serialized).not.toContain('secretKey');
+      expect(serialized).not.toContain('mnemonic');
+      assertNoSensitiveLeak(snapshot, ['privateKey', 'secretKey', 'seed', 'mnemonic']);
+    });
+
+    it('keeps sandbox state isolated after malicious input attempts', async () => {
+      const before = sandbox.takeSnapshot();
+
+      await sandbox.buyTicket({
+        ticketId: XSS_PAYLOAD,
+        eventId: TEMPLATE_INJECTION,
+        buyerPublicKey: 'G_BOB_ATTENDEE_HAPPY'
+      });
+
+      const after = sandbox.takeSnapshot();
+      expect(JSON.stringify(after)).not.toContain('<script>');
+      expect(JSON.stringify(after)).not.toContain(TEMPLATE_INJECTION);
+
+      sandbox.restoreSnapshot(before);
+      const restored = sandbox.takeSnapshot();
+      expect(JSON.stringify(restored)).toBe(JSON.stringify(before));
+    });
+  });
+
   describe('Snapshot & State Restoration', () => {
     it('captures sandbox snapshot and restores previous state faithfully', async () => {
       const snapshot = sandbox.takeSnapshot();
 
       // Mutate state
-      await sandbox.horizon.fundAccount('G_TEMPORARY_USER', 50_0000000);
+      await sandbox.horizon.fundAccount('G_TEMPORARY_USER', 50_000_0000);
       const acc = await sandbox.horizon.getAccount('G_TEMPORARY_USER');
       expect(acc.ok).toBe(true);
 

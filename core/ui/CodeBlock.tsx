@@ -1,5 +1,21 @@
 import { cn } from "@/core/lib/cn";
 
+/**
+ * Renders a pre-formatted code block.
+ *
+ * Security notes:
+ * - "children" is always rendered as a text node inside `<code>`, never as HTML.
+ *   React escapes text nodes, so untrusted input such as `<script>` or
+ *   `<img src=x onerror=...>` is rendered literally and cannot execute.
+ * - No `dangerouslySetInnerHTML` is used, so content cannot escape the
+ *   code block sandbox or inject markup into the parent document.
+ * - `pre` uses `overflow-x-auto` and wraps the code text node directly, so
+ *   long or malicious input cannot break layout or inject additional
+ *   elements.
+ * - Only the optional `className` prop is applied to the root figure; it is
+ *   expected to come from trusted call sites and is not derived from
+ *   untrusted content.
+ */
 export function CodeBlock({
   children,
   label,
