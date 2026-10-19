@@ -134,6 +134,26 @@ function recordIssues(records: unknown): string[] {
   return issues;
 }
 
+function requestIssues(request: MaintainerSimulationRequest): string[] {
+  const issues: string[] = [];
+  if (request.recordIds !== undefined) {
+    if (!Array.isArray(request.recordIds) || !request.recordIds.every(isNonEmptyString)) {
+      issues.push("recordIds must be an array of non-empty strings");
+    } else if (new Set(request.recordIds).size !== request.recordIds.length) {
+      issues.push("recordIds must not contain duplicates");
+    }
+  }
+  if (request.maxExamples !== undefined &&
+      (!Number.isInteger(request.maxExamples) || request.maxExamples < 0)) {
+    issues.push("maxExamples must be a non-negative integer");
+  }
+  const now = request.now instanceof Date ? request.now.getTime() : request.now;
+  if (now !== undefined && (!Number.isFinite(now) || !Number.isSafeInteger(now))) {
+    issues.push("now must be a valid Date or integer timestamp");
+  }
+  return issues;
+}
+
 function buildExamples(report: PolicySimulationReport): AffectedRecordExample[] {
   const byRecord = new Map<string, AffectedRecordExample>();
   for (const effect of report.sideEffects) {
@@ -151,7 +171,7 @@ function buildExamples(report: PolicySimulationReport): AffectedRecordExample[] 
     });
   }
   return [...byRecord.values()].sort(
-    (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || (a.id < b.id ? -1 : 1)
+    (a, b) => SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.id.localeCompare(b.id)
   );
 }
 
@@ -165,6 +185,8 @@ export function runPolicySimulation(
   if (policyProblems.length > 0) return err("invalid_policy", policyProblems);
   const recordProblems = recordIssues(request.records);
   if (recordProblems.length > 0) return err("invalid_records", recordProblems);
+  const selectionProblems = requestIssues(request);
+  if (selectionProblems.length > 0) return err("invalid_records", selectionProblems);
 
   const wanted = request.recordIds ? new Set(request.recordIds) : undefined;
   const selected = wanted ? request.records.filter((record) => wanted.has(record.id)) : request.records;

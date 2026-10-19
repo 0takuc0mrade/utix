@@ -195,6 +195,12 @@ await runOperation(definition, { operationId: `redeem:${eventId}`, context, stor
 should not continue. The record is kept, so the audit trail still explains what
 was attempted.
 
+At a request boundary, use `resolveInterruptedStepAuthorized(auth, ...)` and
+`abandonOperationAuthorized(auth, ...)`. Both require `admin:recovery`, deny
+unknown/non-maintainer roles before reading or writing a checkpoint, and leave
+the record byte-for-byte unchanged on denial. The unguarded functions are kept
+for trusted workers and backwards compatibility.
+
 ## Design decisions and tradeoffs
 
 - **One entry point.** Starting and resuming are the same call, so there is no

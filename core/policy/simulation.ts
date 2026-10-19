@@ -33,7 +33,9 @@ export class PolicySimulator {
         ? new Date(options.now).toISOString()
         : new Date().toISOString();
 
-    const simulationId = `sim-${policy.id}-v${policy.version}-${Date.now().toString(16)}`;
+    // Derive the id from the injected evaluation time. Retrying the same dry
+    // run against the same snapshot can therefore be compared byte-for-byte.
+    const simulationId = `sim-${policy.id}-v${policy.version}-${new Date(timestamp).getTime().toString(16)}`;
     const sideEffects: SimulationSideEffect[] = [];
     const affectedRecordIds = new Set<string>();
 

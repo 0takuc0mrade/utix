@@ -60,3 +60,12 @@ The simulation engine (`core/policy/simulation.ts`) operates as a **strictly rea
 - **Explanation** — `outcome` is `no_impact`, `limited_impact`, or `broad_impact` (more than 30% of evaluated records affected). `examples` lists the most severe affected records with the reason for each, capped by `maxExamples` (default 5; the rest are counted in `omittedExamples`). `report.operationalWarnings` carries the risk warnings.
 
 The policy and the records are only read. Run it against fixtures or an export; it has no write path to production data.
+
+Retries are deterministic when callers pass `now`: the simulation identifier
+is derived from that evaluation timestamp, and affected examples are ordered by
+severity then record id. Keep the same snapshot and `now` while retrying after
+a transport failure. A new snapshot should use a new timestamp and is a new
+preview. Invalid selection ids or bounds fail before evaluation; authorization
+denials fail before records are inspected. Because a preview never writes,
+rollback consists only of discarding it. Applying a policy remains a separate,
+authorized operation and must take its own recovery checkpoint.

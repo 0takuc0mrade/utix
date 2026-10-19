@@ -9,11 +9,13 @@ export {
 
 export {
   abandonOperation,
+  abandonOperationAuthorized,
   decideStep,
   defaultIdempotencyKey,
   nextActionFor,
   operationMachine,
   resolveInterruptedStep,
+  resolveInterruptedStepAuthorized,
   runOperation,
   type ResolveOperationOptions,
   type StepDecision,

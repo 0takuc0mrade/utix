@@ -45,6 +45,16 @@ export {
 } from "@/core/testing/networkProfiles";
 export { networkProfileHandlers } from "@/core/testing/networkProfileHandlers";
 export {
+  RECOVERY_FIXTURE_SCENARIOS,
+  createFaultingOperationStorage,
+  generateRecoveryFixtureCorpus,
+  generateRecoveryPathFixture,
+  type RecoveryFixtureOptions,
+  type RecoveryFixtureScenario,
+  type RecoveryPathFixture,
+  type StorageFailurePoint
+} from "@/core/testing/recoveryFixtures";
+export {
   runAgainstNetworkProfiles,
   getProfileEdgeCases,
   isProfile,

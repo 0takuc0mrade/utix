@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { Result } from "@/core/result/result";
 import {
   abandonOperation,
+  abandonOperationAuthorized,
   createOperationStorage,
   decideStep,
   defaultIdempotencyKey,
   nextActionFor,
   operationMachine,
   resolveInterruptedStep,
+  resolveInterruptedStepAuthorized,
   runOperation,
   type OperationDefinition,
   type OperationErrorCode,
@@ -379,6 +381,42 @@ describe("runOperation", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("storage_error");
+  });
+});
+
+describe("authorized recovery decisions", () => {
+  it("fails closed without changing the checkpoint", async () => {
+    const storage = createOperationStorage();
+    const definition: OperationDefinition<Ctx> = {
+      kind: "ticket_flow",
+      steps: [{ id: "submit", run: () => ({ status: "interrupted", errorCode: "timeout", committed: true }) }]
+    };
+    await runOperation(definition, options(storage));
+    const before = storage.read("op-1");
+
+    expect(resolveInterruptedStepAuthorized(
+      { role: "viewer", userId: "eve" }, "op-1", "submit", "applied", { storage }
+    )).toEqual({ ok: false, code: "permission_denied" });
+    expect(abandonOperationAuthorized({ role: "service" }, "op-1", { storage })).toEqual({
+      ok: false,
+      code: "permission_denied"
+    });
+    expect(storage.read("op-1")).toEqual(before);
+  });
+
+  it("allows a maintainer to resolve and resume", async () => {
+    const storage = createOperationStorage();
+    const definition: OperationDefinition<Ctx> = {
+      kind: "ticket_flow",
+      steps: [{ id: "submit", run: () => ({ status: "interrupted", errorCode: "timeout", committed: true }) }]
+    };
+    await runOperation(definition, options(storage));
+
+    const resolved = resolveInterruptedStepAuthorized(
+      { role: "maintainer", userId: "ada" }, "op-1", "submit", "applied", { storage }
+    );
+    expect(resolved.ok && resolved.value.steps[0].status).toBe("succeeded");
+    expect(progress(await runOperation(definition, options(storage, 1))).state).toBe("completed");
   });
 });
 

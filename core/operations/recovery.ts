@@ -24,6 +24,8 @@ import {
   type TransitionContext
 } from "@/core/lifecycle/lifecycle";
 import { newCorrelationId } from "@/core/telemetry/telemetry";
+import type { AuthContext } from "@/core/auth/middleware";
+import { hasPermission } from "@/core/auth/types";
 import { err, isErr, ok, type Result } from "@/core/result/result";
 import {
   OPERATION_STATES,
@@ -504,6 +506,26 @@ export function resolveInterruptedStep(
   return ok(next);
 }
 
+/**
+ * Server-side boundary for the destructive recovery decision.  The original
+ * resolver remains available for trusted/internal callers; request handlers
+ * should use this function so a viewer cannot assert that an external effect
+ * did or did not land.
+ */
+export function resolveInterruptedStepAuthorized(
+  auth: AuthContext,
+  operationId: string,
+  stepId: string,
+  resolution: StepResolution,
+  options: ResolveOperationOptions
+): Result<OperationRecord, OperationErrorCode> {
+  if (!hasPermission(auth.role, "admin:recovery")) return err("permission_denied");
+  return resolveInterruptedStep(operationId, stepId, resolution, {
+    ...options,
+    actor: options.actor ?? `maintainer:${auth.userId ?? "unknown"}`
+  });
+}
+
 /** Gives up on an operation on purpose. The record is kept for the audit trail. */
 export function abandonOperation(
   operationId: string,
@@ -523,4 +545,17 @@ export function abandonOperation(
   if (isErr(advanced)) return advanced;
   if (!persist(options.storage, advanced.value)) return err("storage_error");
   return ok(advanced.value);
+}
+
+/** Authorization boundary for abandoning a recoverable operation. */
+export function abandonOperationAuthorized(
+  auth: AuthContext,
+  operationId: string,
+  options: ResolveOperationOptions
+): Result<OperationRecord, OperationErrorCode> {
+  if (!hasPermission(auth.role, "admin:recovery")) return err("permission_denied");
+  return abandonOperation(operationId, {
+    ...options,
+    actor: options.actor ?? `maintainer:${auth.userId ?? "unknown"}`
+  });
 }

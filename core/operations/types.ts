@@ -198,4 +198,5 @@ export type OperationErrorCode =
   | "unknown_operation"
   | "unknown_step"
   | "terminal_operation"
+  | "permission_denied"
   | "storage_error";

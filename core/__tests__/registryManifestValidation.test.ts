@@ -21,7 +21,7 @@ import {
  *
  * These fixtures are `.txt` rather than `.ts` on purpose: a manifest declaring
  * an invalid status or network is exactly what the type system rejects, and
- * `tsconfig.json` includes `**/*.ts`, so typed fixtures could not express the
+ * `tsconfig.json` includes every TypeScript file, so typed fixtures could not express the
  * invalid shapes at all.
  */
 const FIXTURE_DIR = path.resolve(process.cwd(), "scripts/__tests__/fixtures/registry-manifests");

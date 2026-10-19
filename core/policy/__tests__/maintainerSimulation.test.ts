@@ -67,6 +67,11 @@ describe("runPolicySimulation", () => {
     expect(JSON.stringify({ POLICY, records })).toBe(before);
   });
 
+  it("returns an identical preview when a dry run is retried", () => {
+    const request = { policy: POLICY, records: [tx("tx-1", 5000)], now: 1_700_000_000_000 };
+    expect(run(request)).toEqual(run(request));
+  });
+
   it("rejects an invalid policy with every problem listed", () => {
     const bad = { ...POLICY, id: "", version: 0, parameters: { maxBaseFeeStroops: -1 } };
     const result = runPolicySimulation(MAINTAINER, { policy: bad, records: RECORDS });
@@ -79,6 +84,20 @@ describe("runPolicySimulation", () => {
     const result = runPolicySimulation(MAINTAINER, { policy: POLICY, records });
     expect(result).toMatchObject({ ok: false, code: "invalid_records" });
     expect(!result.ok && result.detail).toEqual(['duplicate record id "tx-1"', 'record "x" has an unknown type']);
+  });
+
+  it("rejects malformed preview bounds without evaluating", () => {
+    const duplicateSelection = runPolicySimulation(MAINTAINER, {
+      policy: POLICY,
+      records: RECORDS,
+      recordIds: ["tx-1", "tx-1"],
+      maxExamples: -1
+    });
+    expect(duplicateSelection).toMatchObject({ ok: false, code: "invalid_records" });
+    expect(!duplicateSelection.ok && duplicateSelection.detail).toEqual([
+      "recordIds must not contain duplicates",
+      "maxExamples must be a non-negative integer"
+    ]);
   });
 
   it("denies roles without config access", () => {
